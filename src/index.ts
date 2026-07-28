@@ -9,6 +9,10 @@ import { ArbitrageCalculator } from './services/ArbitrageCalculator.js';
 import { OpportunityService } from './services/OpportunityService.js';
 import { TriangleBuilder } from './services/TriangleBuilder.js';
 
+const SNAPSHOT_CONCURRENCY = 10;
+const HEALTH_CHECK_INTERVAL_MS = 10_000;
+const STALE_BOOK_AFTER_MS = 5_000;
+
 const logger = pino({ level: config.logLevel });
 const rest = new MexcRestClient();
 const repository = new ArbitrageRepository(config.databaseUrl);
@@ -23,50 +27,56 @@ async function main(): Promise<void> {
   logger.info({ startAsset: config.trading.startAsset }, 'Starting arbitrage bot');
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
-  
-  // ДИАГНОСТИКА: что загрузили с MEXC
+
   logger.info({
     totalSymbols: symbols.length,
-    sampleSymbols: symbols.slice(0, 5).map(s => ({
-      symbol: s.symbol,
-      baseAsset: s.baseAsset,
-      quoteAsset: s.quoteAsset,
-      status: s.status,
-      isSpotTradingAllowed: s.isSpotTradingAllowed
+    sampleSymbols: symbols.slice(0, 5).map((symbol) => ({
+      symbol: symbol.symbol,
+      baseAsset: symbol.baseAsset,
+      quoteAsset: symbol.quoteAsset,
+      status: symbol.status,
+      isSpotTradingAllowed: symbol.isSpotTradingAllowed
     })),
-    uniqueBaseAssets: [...new Set(symbols.map(s => s.baseAsset))].slice(0, 20),
-    uniqueQuoteAssets: [...new Set(symbols.map(s => s.quoteAsset))].slice(0, 20)
+    uniqueBaseAssets: [...new Set(symbols.map((symbol) => symbol.baseAsset))].slice(0, 20),
+    uniqueQuoteAssets: [...new Set(symbols.map((symbol) => symbol.quoteAsset))].slice(0, 20)
   }, 'Loaded symbols from MEXC');
 
   const triangles = new TriangleBuilder().build(symbols, config.trading.startAsset);
-  
-  // ДИАГНОСТИКА: что построили
+
   logger.info({
     trianglesCount: triangles.length,
-    sampleTriangles: triangles.slice(0, 5).map(t => ({
-      id: t.id,
-      startAsset: t.startAsset,
-      middleAsset1: t.middleAsset1,
-      middleAsset2: t.middleAsset2,
-      legs: t.legs.map(l => `${l.fromAsset}->${l.toAsset}(${l.symbol}:${l.side})`)
+    sampleTriangles: triangles.slice(0, 5).map((triangle) => ({
+      id: triangle.id,
+      startAsset: triangle.startAsset,
+      middleAsset1: triangle.middleAsset1,
+      middleAsset2: triangle.middleAsset2,
+      legs: triangle.legs.map(
+        (leg) => `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
+      )
     }))
   }, 'Built triangles');
 
   if (triangles.length === 0) {
-    // ДОПОЛНИТЕЛЬНАЯ ДИАГНОСТИКА при отсутствии треугольников
-    const usdtSymbols = symbols.filter(s => s.quoteAsset === config.trading.startAsset || s.baseAsset === config.trading.startAsset);
+    const startAssetSymbols = symbols.filter(
+      (symbol) =>
+        symbol.quoteAsset === config.trading.startAsset ||
+        symbol.baseAsset === config.trading.startAsset
+    );
+
     logger.warn({
       startAsset: config.trading.startAsset,
-      symbolsWithStartAsset: usdtSymbols.length,
-      sampleUsdtSymbols: usdtSymbols.slice(0, 10).map(s => s.symbol)
+      symbolsWithStartAsset: startAssetSymbols.length,
+      sampleStartAssetSymbols: startAssetSymbols.slice(0, 10).map((symbol) => symbol.symbol)
     }, 'No triangles found - diagnostic info');
-    
+
     throw new Error(`No triangles found for ${config.trading.startAsset}`);
   }
 
-  const usedSymbols = [...new Set(triangles.flatMap((triangle) =>
-    triangle.legs.map((leg) => leg.symbol)
-  ))];
+  const usedSymbols = [
+    ...new Set(
+      triangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol))
+    )
+  ];
 
   logger.info({
     symbols: symbols.length,
@@ -77,12 +87,40 @@ async function main(): Promise<void> {
 
   const books = new Map<string, OrderBook>();
 
-  for (const symbol of usedSymbols) {
-    const book = new OrderBook(symbol);
-    books.set(symbol, book);
+  for (
+    let startIndex = 0;
+    startIndex < usedSymbols.length;
+    startIndex += SNAPSHOT_CONCURRENCY
+  ) {
+    const batch = usedSymbols.slice(
+      startIndex,
+      startIndex + SNAPSHOT_CONCURRENCY
+    );
 
-    const snapshot = await rest.getDepth(symbol, 100);
-    book.loadSnapshot(snapshot);
+    const results = await Promise.allSettled(
+      batch.map(async (symbol) => {
+        const book = new OrderBook(symbol);
+        const snapshot = await rest.getDepth(symbol, 100);
+
+        book.loadSnapshot(snapshot);
+        books.set(symbol, book);
+      })
+    );
+
+    const failed = results.filter((result) => result.status === 'rejected');
+
+    if (failed.length > 0) {
+      logger.warn({
+        failed: failed.length,
+        batch
+      }, 'Some order book snapshots failed to load');
+    }
+
+    logger.info({
+      loaded: books.size,
+      total: usedSymbols.length,
+      failedInBatch: failed.length
+    }, 'Loading order book snapshots');
   }
 
   logger.info({ loadedBooks: books.size }, 'Order books initialized');
@@ -110,18 +148,27 @@ async function main(): Promise<void> {
     usedSymbols,
     async (delta) => {
       const book = books.get(delta.symbol);
-      if (!book) return;
+
+      if (!book) {
+        return;
+      }
 
       const applied = book.applyDelta(delta);
 
       if (!applied) {
-        logger.warn({ symbol: delta.symbol }, 'Order book out of sync; loading snapshot');
+        logger.warn(
+          { symbol: delta.symbol },
+          'Order book out of sync; loading fresh snapshot'
+        );
 
         try {
           const snapshot = await rest.getDepth(delta.symbol, 100);
           book.loadSnapshot(snapshot);
         } catch (error) {
-          logger.error({ err: error, symbol: delta.symbol }, 'Cannot reload order book');
+          logger.error(
+            { err: error, symbol: delta.symbol },
+            'Cannot reload order book'
+          );
         }
 
         return;
@@ -136,6 +183,36 @@ async function main(): Promise<void> {
     () => logger.info('MEXC WebSocket connected'),
     () => logger.warn('MEXC WebSocket disconnected')
   );
+
+  setInterval(() => {
+    const now = Date.now();
+    const snapshots = [...books.values()].map((book) => book.getSnapshot(5));
+
+    const readyBooks = snapshots.filter((snapshot) => snapshot.ready);
+    const staleBooks = readyBooks.filter(
+      (snapshot) => now - snapshot.updatedAt > STALE_BOOK_AFTER_MS
+    );
+    const emptyBooks = snapshots.filter(
+      (snapshot) =>
+        snapshot.bids.length === 0 ||
+        snapshot.asks.length === 0
+    );
+
+    logger.info({
+      totalBooks: snapshots.length,
+      readyBooks: readyBooks.length,
+      staleBooks: staleBooks.length,
+      emptyBooks: emptyBooks.length,
+      sample: snapshots.slice(0, 3).map((snapshot) => ({
+        symbol: snapshot.symbol,
+        ready: snapshot.ready,
+        bid: snapshot.bids[0]?.price ?? null,
+        ask: snapshot.asks[0]?.price ?? null,
+        ageMs: now - snapshot.updatedAt,
+        lastUpdateId: snapshot.lastUpdateId
+      }))
+    }, 'Order book health');
+  }, HEALTH_CHECK_INTERVAL_MS);
 
   ws.connect();
 
