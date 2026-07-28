@@ -3,7 +3,7 @@ import { MexcRestClient } from './MexcRestClient.js';
 
 interface ExchangeInfoSymbol {
   symbol: string;
-  status: number;
+  status: string | number;
   baseAsset: string;
   quoteAsset: string;
   isSpotTradingAllowed: boolean;
@@ -39,8 +39,10 @@ export class ExchangeInfoLoader {
     }
 
     const active = raw.symbols.filter((item) => {
+      const statusOnline = String(item.status) === '1';
+
       return (
-        item.status === 1 &&
+        statusOnline &&
         item.isSpotTradingAllowed === true &&
         Boolean(item.symbol) &&
         Boolean(item.baseAsset) &&
@@ -68,17 +70,15 @@ export class ExchangeInfoLoader {
       status: 'ONLINE',
       isSpotTradingAllowed: true,
 
-      // Это шаг количества/суммы, а не "число знаков".
-      // Пока сохраняем значение как есть; нормализацию добавим отдельно.
-      baseSizePrecision: toNumber(item.baseSizePrecision, 0),
-      quoteAmountPrecision: toNumber(item.quoteAmountPrecision, 0),
-      quoteAmountPrecisionMarket: toNumber(item.quoteAmountPrecisionMarket, 0),
+      baseSizePrecision: toNumber(item.baseSizePrecision),
+      quoteAmountPrecision: toNumber(item.quoteAmountPrecision),
+      quoteAmountPrecisionMarket: toNumber(item.quoteAmountPrecisionMarket),
 
-      minQuoteAmount: toNumber(item.minQuoteAmount, 0) || undefined,
-      minQuoteAmountMarket: toNumber(item.minQuoteAmountMarket, 0) || undefined,
+      minQuoteAmount: toNumber(item.minQuoteAmount) || undefined,
+      minQuoteAmountMarket: toNumber(item.minQuoteAmountMarket) || undefined,
 
-      makerCommission: toNumber(item.makerCommission, 0),
-      takerCommission: toNumber(item.takerCommission, 0)
+      makerCommission: toNumber(item.makerCommission),
+      takerCommission: toNumber(item.takerCommission)
     }));
   }
 }
