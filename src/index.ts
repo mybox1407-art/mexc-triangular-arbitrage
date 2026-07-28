@@ -20,10 +20,47 @@ async function main(): Promise<void> {
     );
   }
 
+  logger.info({ startAsset: config.trading.startAsset }, 'Starting arbitrage bot');
+
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
+  
+  // ДИАГНОСТИКА: что загрузили с MEXC
+  logger.info({
+    totalSymbols: symbols.length,
+    sampleSymbols: symbols.slice(0, 5).map(s => ({
+      symbol: s.symbol,
+      baseAsset: s.baseAsset,
+      quoteAsset: s.quoteAsset,
+      status: s.status,
+      isSpotTradingAllowed: s.isSpotTradingAllowed
+    })),
+    uniqueBaseAssets: [...new Set(symbols.map(s => s.baseAsset))].slice(0, 20),
+    uniqueQuoteAssets: [...new Set(symbols.map(s => s.quoteAsset))].slice(0, 20)
+  }, 'Loaded symbols from MEXC');
+
   const triangles = new TriangleBuilder().build(symbols, config.trading.startAsset);
+  
+  // ДИАГНОСТИКА: что построили
+  logger.info({
+    trianglesCount: triangles.length,
+    sampleTriangles: triangles.slice(0, 5).map(t => ({
+      id: t.id,
+      startAsset: t.startAsset,
+      middleAsset1: t.middleAsset1,
+      middleAsset2: t.middleAsset2,
+      legs: t.legs.map(l => `${l.fromAsset}->${l.toAsset}(${l.symbol}:${l.side})`)
+    }))
+  }, 'Built triangles');
 
   if (triangles.length === 0) {
+    // ДОПОЛНИТЕЛЬНАЯ ДИАГНОСТИКА при отсутствии треугольников
+    const usdtSymbols = symbols.filter(s => s.quoteAsset === config.trading.startAsset || s.baseAsset === config.trading.startAsset);
+    logger.warn({
+      startAsset: config.trading.startAsset,
+      symbolsWithStartAsset: usdtSymbols.length,
+      sampleUsdtSymbols: usdtSymbols.slice(0, 10).map(s => s.symbol)
+    }, 'No triangles found - diagnostic info');
+    
     throw new Error(`No triangles found for ${config.trading.startAsset}`);
   }
 
@@ -34,7 +71,8 @@ async function main(): Promise<void> {
   logger.info({
     symbols: symbols.length,
     triangles: triangles.length,
-    subscribedPairs: usedSymbols.length
+    subscribedPairs: usedSymbols.length,
+    sampleUsedSymbols: usedSymbols.slice(0, 10)
   }, 'Arbitrage scanner initialized');
 
   const books = new Map<string, OrderBook>();
@@ -46,6 +84,8 @@ async function main(): Promise<void> {
     const snapshot = await rest.getDepth(symbol, 100);
     book.loadSnapshot(snapshot);
   }
+
+  logger.info({ loadedBooks: books.size }, 'Order books initialized');
 
   const calculator = new ArbitrageCalculator();
 
