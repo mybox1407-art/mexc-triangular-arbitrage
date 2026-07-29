@@ -7,16 +7,20 @@ RUN npm ci
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY proto ./proto
+
 RUN npm run build
 
-FROM node:22-alpine
+FROM node:22-alpine AS runtime
 
 WORKDIR /app
+
 ENV NODE_ENV=production
 
 COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/proto ./proto
 
 CMD ["node", "dist/index.js"]
