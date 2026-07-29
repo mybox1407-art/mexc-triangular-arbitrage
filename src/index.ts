@@ -2,8 +2,10 @@ import pino from 'pino';
 import { config } from './config.js';
 import { OrderBook } from './domain/orderBook.js';
 import { ExchangeInfoLoader } from './mexc/ExchangeInfoLoader.js';
+import { MexcAuthenticatedClient } from './mexc/MexcAuthenticatedClient.js';
 import { MexcPublicWs } from './mexc/MexcPublicWs.js';
 import { MexcRestClient } from './mexc/MexcRestClient.js';
+import { MexcTradeFeeLoader } from './mexc/MexcTradeFeeLoader.js';
 import { ArbitrageRepository } from './repositories/ArbitrageRepository.js';
 import { ArbitrageCalculator } from './services/ArbitrageCalculator.js';
 import { CsvOpportunityWriter } from './services/CsvOpportunityWriter.js';
@@ -201,7 +203,36 @@ async function main(): Promise<void> {
     'Order books initialized'
   );
 
-  const calculator = new ArbitrageCalculator();
+  let takerFeesBySymbol = new Map<string, number>();
+
+  if (config.mexc.apiKey && config.mexc.apiSecret) {
+    const authenticatedClient = new MexcAuthenticatedClient();
+
+    takerFeesBySymbol = await new MexcTradeFeeLoader(
+      authenticatedClient,
+      logger
+    ).loadTakerFees(readySymbols);
+  } else {
+    logger.warn(
+      {
+        fallbackTakerFeeRate: config.trading.takerFeeRate
+      },
+      'MEXC API credentials are absent; using fallback taker fee for all symbols'
+    );
+  }
+
+  const calculator = new ArbitrageCalculator(takerFeesBySymbol);
+
+  logger.info(
+    {
+      symbolsWithAccountFees: takerFeesBySymbol.size,
+      zeroFeeSymbols: [...takerFeesBySymbol.entries()]
+        .filter(([, feeRate]) => feeRate === 0)
+        .map(([symbol]) => symbol),
+      fallbackTakerFeeRate: config.trading.takerFeeRate
+    },
+    'Initialized symbol-specific taker fees'
+  );
 
   const opportunityService = new OpportunityService(
     readyTriangles,
