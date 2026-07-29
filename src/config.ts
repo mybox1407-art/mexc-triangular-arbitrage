@@ -46,6 +46,12 @@ export const config = {
   nodeEnv: env('NODE_ENV', 'development'),
   logLevel: env('LOG_LEVEL', 'info'),
 
+  // Путь внутри контейнера для CSV с прошедшими paper-сигналами.
+  csvOpportunitiesPath: env(
+    'CSV_OPPORTUNITIES_PATH',
+    '/app/data/paper-opportunities.csv'
+  ),
+
   mexc: {
     restUrl: env('MEXC_REST_URL', 'https://api.mexc.com'),
     wsUrl: env('MEXC_WS_URL', 'wss://wbs-api.mexc.com/ws'),
