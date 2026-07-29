@@ -8,23 +8,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isPermissionError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (
+      error.message.includes('code":700007') ||
+      error.message.includes('No permission to access the endpoint')
+    )
+  );
+}
+
 export class MexcTradeFeeLoader {
   constructor(
     private readonly client: MexcAuthenticatedClient,
     private readonly logger: pino.Logger
   ) {}
 
-  async loadTakerFees(symbols: string): Promise<Map<string, number>>;
-  async loadTakerFees(symbols: string[]): Promise<Map<string, number>>;
-  async loadTakerFees(
-    symbols: string | string[]
-  ): Promise<Map<string, number>> {
+  async loadTakerFees(symbols: string[]): Promise<Map<string, number>> {
     const uniqueSymbols = [
-      ...new Set(
-        (Array.isArray(symbols) ? symbols : [symbols]).map((symbol) =>
-          symbol.toUpperCase()
-        )
-      )
+      ...new Set(symbols.map((symbol) => symbol.toUpperCase()))
     ];
 
     const fees = new Map<string, number>();
@@ -44,6 +46,23 @@ export class MexcTradeFeeLoader {
           'Loaded MEXC account trade fee'
         );
       } catch (error) {
+        if (isPermissionError(error)) {
+          this.logger.error(
+            {
+              err: error,
+              symbol,
+              fallbackTakerFeeRate: config.trading.takerFeeRate
+            },
+            'MEXC API key lacks SPOT_ACCOUNT_READ; using fallback fee for all symbols'
+          );
+
+          for (const remainingSymbol of uniqueSymbols) {
+            fees.set(remainingSymbol, config.trading.takerFeeRate);
+          }
+
+          return fees;
+        }
+
         fees.set(symbol, config.trading.takerFeeRate);
 
         this.logger.warn(
