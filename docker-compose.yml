@@ -11,6 +11,8 @@ services:
     init: true
     cpus: 2
     mem_limit: 1g
+    volumes:
+      - ./data:/app/data
     networks:
       - arb_network
 
