@@ -20,10 +20,9 @@ const PING_INTERVAL_MS = 20_000;
 
 export class MexcPublicWs {
   private readonly connections: WsConnection[] = [];
-  private reconnectTimer?: NodeJS.Timeout;
   private stopped = false;
   private receivedMessages = 0;
-  private appliedDepthMessages = 0;
+  private depthMessages = 0;
 
   constructor(
     private readonly symbols: string[],
@@ -35,16 +34,13 @@ export class MexcPublicWs {
   connect(): void {
     this.stopped = false;
 
-    const groups = this.chunkSymbols(this.symbols, MAX_SUBSCRIPTIONS_PER_SOCKET);
-
-    for (const group of groups) {
+    for (const group of this.chunk(this.symbols, MAX_SUBSCRIPTIONS_PER_SOCKET)) {
       this.open(group);
     }
   }
 
   stop(): void {
     this.stopped = true;
-    clearTimeout(this.reconnectTimer);
 
     for (const connection of this.connections) {
       clearInterval(connection.pingTimer);
@@ -83,10 +79,17 @@ export class MexcPublicWs {
       this.receivedMessages += 1;
 
       if (isBinary) {
+        const bytes = Array.isArray(raw)
+          ? Buffer.concat(raw).length
+          : raw instanceof ArrayBuffer
+            ? raw.byteLength
+            : raw.length;
+
         console.warn(JSON.stringify({
           msg: 'Unexpected binary MEXC WS message on JSON topic',
-          bytes: raw.length
+          bytes
         }));
+
         return;
       }
 
@@ -111,10 +114,7 @@ export class MexcPublicWs {
       this.onClose?.();
 
       if (!this.stopped) {
-        this.reconnectTimer = setTimeout(
-          () => this.open(symbols),
-          RECONNECT_DELAY_MS
-        );
+        setTimeout(() => this.open(symbols), RECONNECT_DELAY_MS);
       }
     });
 
@@ -133,15 +133,18 @@ export class MexcPublicWs {
     for (const symbol of symbols) {
       this.send(connection.ws, {
         method: 'SUBSCRIPTION',
-        params: [`spot@public.aggre.depth.v3.api@100ms@${symbol.toUpperCase()}`]
+        params: [
+          `spot@public.aggre.depth.v3.api@100ms@${symbol.toUpperCase()}`
+        ]
       });
     }
 
     console.log(JSON.stringify({
       msg: 'MEXC depth subscriptions sent',
       count: symbols.length,
-      topics: symbols.slice(0, 5).map(
-        (symbol) => `spot@public.aggre.depth.v3.api@100ms@${symbol.toUpperCase()}`
+      sampleTopics: symbols.slice(0, 5).map(
+        (symbol) =>
+          `spot@public.aggre.depth.v3.api@100ms@${symbol.toUpperCase()}`
       )
     }));
   }
@@ -165,14 +168,21 @@ export class MexcPublicWs {
       payload = JSON.parse(raw);
     } catch {
       console.warn(JSON.stringify({
-        msg: 'Cannot parse MEXC WS JSON message',
+        msg: 'Cannot parse MEXC WebSocket JSON message',
         preview: raw.slice(0, 300)
       }));
       return;
     }
 
-    const depth = payload?.d?.publicAggreDepths ?? payload?.publicAggreDepths;
-    const symbol = String(payload?.s ?? payload?.symbol ?? '').toUpperCase();
+    const depth =
+      payload?.d?.publicAggreDepths ??
+      payload?.publicAggreDepths;
+
+    const symbol = String(
+      payload?.s ??
+      payload?.symbol ??
+      ''
+    ).toUpperCase();
 
     if (!depth || !symbol) {
       return;
@@ -189,28 +199,35 @@ export class MexcPublicWs {
     ]) as [string, string][];
 
     const fromVersion = Number(
-      depth.fromVersion ?? depth.fromVersionId ?? depth.version ?? 0
+      depth.fromVersion ??
+      depth.fromVersionId ??
+      depth.version ??
+      0
     );
+
     const toVersion = Number(
-      depth.toVersion ?? depth.toVersionId ?? depth.version ?? 0
+      depth.toVersion ??
+      depth.toVersionId ??
+      depth.version ??
+      0
     );
 
     if (!Number.isFinite(toVersion) || toVersion <= 0) {
       console.warn(JSON.stringify({
-        msg: 'MEXC depth message has no valid version',
+        msg: 'MEXC depth message contains no valid version',
         symbol,
         preview: raw.slice(0, 500)
       }));
       return;
     }
 
-    this.appliedDepthMessages += 1;
+    this.depthMessages += 1;
 
-    if (this.appliedDepthMessages % 100 === 0) {
+    if (this.depthMessages % 100 === 0) {
       console.log(JSON.stringify({
         msg: 'MEXC depth updates received',
         receivedMessages: this.receivedMessages,
-        appliedDepthMessages: this.appliedDepthMessages,
+        depthMessages: this.depthMessages,
         symbol,
         fromVersion,
         toVersion,
@@ -236,11 +253,11 @@ export class MexcPublicWs {
     });
   }
 
-  private chunkSymbols(items: string[], size: number): string[][] {
+  private chunk(items: string[], chunkSize: number): string[][] {
     const chunks: string[][] = [];
 
-    for (let index = 0; index < items.length; index += size) {
-      chunks.push(items.slice(index, index + size));
+    for (let index = 0; index < items.length; index += chunkSize) {
+      chunks.push(items.slice(index, index + chunkSize));
     }
 
     return chunks;
