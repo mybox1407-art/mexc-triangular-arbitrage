@@ -13,8 +13,8 @@ import { OpportunityService } from './services/OpportunityService.js';
 import { TriangleBuilder } from './services/TriangleBuilder.js';
 
 const ALLOWED_ASSETS = new Set([
-  'USDT',
   'USDC',
+  'USDT',
   'BTC',
   'ETH',
   'SOL',
@@ -32,6 +32,7 @@ const ALLOWED_ASSETS = new Set([
 ]);
 
 const MAX_TRIANGLES = Number.POSITIVE_INFINITY;
+const MAX_PAID_LEGS = 1;
 const SNAPSHOT_DELAY_MS = 300;
 const HEALTH_CHECK_INTERVAL_MS = 10_000;
 const STALE_BOOK_AFTER_MS = 5_000;
@@ -57,30 +58,25 @@ async function main(): Promise<void> {
 
   if (!config.mexc.apiKey || !config.mexc.apiSecret) {
     throw new Error(
-      'MEXC_API_KEY and MEXC_API_SECRET are required for zero-fee-only mode.'
+      'MEXC_API_KEY and MEXC_API_SECRET are required for symbol-specific fee mode.'
+    );
+  }
+
+  if (config.trading.startAsset !== 'USDC') {
+    throw new Error(
+      'USDC scanner requires START_ASSET=USDC in .env.'
     );
   }
 
   logger.info(
-    { startAsset: config.trading.startAsset },
-    'Starting zero-fee triangular arbitrage scanner'
+    {
+      startAsset: config.trading.startAsset,
+      maxPaidLegs: MAX_PAID_LEGS
+    },
+    'Starting USDC low-fee triangular arbitrage scanner'
   );
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
-
-  logger.info(
-    {
-      totalSymbols: symbols.length,
-      sampleSymbols: symbols.slice(0, 5).map((symbol) => ({
-        symbol: symbol.symbol,
-        baseAsset: symbol.baseAsset,
-        quoteAsset: symbol.quoteAsset,
-        status: symbol.status,
-        isSpotTradingAllowed: symbol.isSpotTradingAllowed
-      }))
-    },
-    'Loaded symbols from MEXC'
-  );
 
   const liquidSymbols = symbols.filter(
     (symbol) =>
@@ -90,6 +86,7 @@ async function main(): Promise<void> {
 
   logger.info(
     {
+      totalSymbols: symbols.length,
       totalLiquidSymbols: liquidSymbols.length,
       liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
     },
@@ -107,22 +104,19 @@ async function main(): Promise<void> {
     {
       allTrianglesCount: allTriangles.length,
       selectedTrianglesCount: triangles.length,
-      sampleTriangles: triangles.slice(0, 5).map((triangle) => ({
+      sampleTriangles: triangles.slice(0, 10).map((triangle) => ({
         id: triangle.id,
-        startAsset: triangle.startAsset,
         legs: triangle.legs.map(
           (leg) =>
             `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
         )
       }))
     },
-    'Built triangles'
+    'Built USDC triangles'
   );
 
   if (triangles.length === 0) {
-    throw new Error(
-      `No liquid triangles found for ${config.trading.startAsset}`
-    );
+    throw new Error('No USDC triangles found for allowed assets.');
   }
 
   const candidateSymbols = [
@@ -132,15 +126,6 @@ async function main(): Promise<void> {
       )
     )
   ];
-
-  logger.info(
-    {
-      selectedTriangles: triangles.length,
-      candidatePairs: candidateSymbols.length,
-      candidateSymbols
-    },
-    'Loading account fees for candidate pairs'
-  );
 
   const authenticatedClient = new MexcAuthenticatedClient();
 
@@ -153,39 +138,40 @@ async function main(): Promise<void> {
     .filter(([, feeRate]) => Math.abs(feeRate) <= ZERO_FEE_EPSILON)
     .map(([symbol]) => symbol);
 
-  const zeroFeeTriangles = triangles.filter((triangle) =>
-    triangle.legs.every((leg) => {
+  const lowFeeTriangles = triangles.filter((triangle) => {
+    const paidLegs = triangle.legs.filter((leg) => {
       const feeRate = takerFeesBySymbol.get(leg.symbol.toUpperCase());
 
       return (
-        feeRate !== undefined &&
-        Math.abs(feeRate) <= ZERO_FEE_EPSILON
+        feeRate === undefined ||
+        Math.abs(feeRate) > ZERO_FEE_EPSILON
       );
-    })
-  );
+    });
+
+    return paidLegs.length <= MAX_PAID_LEGS;
+  });
 
   logger.info(
     {
       symbolsWithAccountFees: takerFeesBySymbol.size,
       zeroFeeSymbols,
       candidateTrianglesCount: triangles.length,
-      zeroFeeTrianglesCount: zeroFeeTriangles.length,
-      zeroFeeTriangleIds: zeroFeeTriangles.map(
-        (triangle) => triangle.id
-      )
+      lowFeeTrianglesCount: lowFeeTriangles.length,
+      maxPaidLegs: MAX_PAID_LEGS,
+      lowFeeTriangleIds: lowFeeTriangles.map((triangle) => triangle.id)
     },
-    'Filtered fully zero-fee triangles'
+    'Filtered USDC low-fee triangles'
   );
 
-  if (zeroFeeTriangles.length === 0) {
+  if (lowFeeTriangles.length === 0) {
     throw new Error(
-      'No fully zero-fee triangles found for this account. Do not use fallback fees in zero-fee-only mode.'
+      'No USDC triangles with no more than one paid leg were found.'
     );
   }
 
   const usedSymbols = [
     ...new Set(
-      zeroFeeTriangles.flatMap((triangle) =>
+      lowFeeTriangles.flatMap((triangle) =>
         triangle.legs.map((leg) => leg.symbol)
       )
     )
@@ -193,11 +179,11 @@ async function main(): Promise<void> {
 
   logger.info(
     {
-      selectedTriangles: zeroFeeTriangles.length,
+      selectedTriangles: lowFeeTriangles.length,
       subscribedPairs: usedSymbols.length,
       usedSymbols
     },
-    'Zero-fee arbitrage scanner initialized'
+    'USDC low-fee scanner initialized'
   );
 
   const books = new Map<string, OrderBook>();
@@ -220,10 +206,7 @@ async function main(): Promise<void> {
       );
     } catch (error) {
       logger.warn(
-        {
-          err: error,
-          symbol
-        },
+        { err: error, symbol },
         'Cannot load order book snapshot; symbol will be skipped'
       );
     }
@@ -231,13 +214,13 @@ async function main(): Promise<void> {
     await sleep(SNAPSHOT_DELAY_MS);
   }
 
-  const readyTriangles = zeroFeeTriangles.filter((triangle) =>
+  const readyTriangles = lowFeeTriangles.filter((triangle) =>
     triangle.legs.every((leg) => books.has(leg.symbol))
   );
 
   if (readyTriangles.length === 0) {
     throw new Error(
-      'No zero-fee triangles with fully initialized order books.'
+      'No low-fee USDC triangles with fully initialized order books.'
     );
   }
 
@@ -251,13 +234,13 @@ async function main(): Promise<void> {
 
   logger.info(
     {
-      requestedZeroFeeTriangles: zeroFeeTriangles.length,
-      readyZeroFeeTriangles: readyTriangles.length,
+      requestedLowFeeTriangles: lowFeeTriangles.length,
+      readyLowFeeTriangles: readyTriangles.length,
       loadedBooks: books.size,
       subscribedPairs: readySymbols.length,
       readySymbols
     },
-    'Zero-fee order books initialized'
+    'USDC low-fee order books initialized'
   );
 
   const calculator = new ArbitrageCalculator(takerFeesBySymbol);
@@ -289,7 +272,7 @@ async function main(): Promise<void> {
             levelsUsed: leg.levelsUsed
           }))
         },
-        'Zero-fee paper arbitrage opportunity'
+        'USDC low-fee paper arbitrage opportunity'
       );
 
       await repository.saveOpportunity(opportunity);
@@ -353,7 +336,7 @@ async function main(): Promise<void> {
           lastUpdateId: snapshot.lastUpdateId
         }))
       },
-      'Zero-fee order book health'
+      'USDC low-fee order book health'
     );
   }, HEALTH_CHECK_INTERVAL_MS);
 
