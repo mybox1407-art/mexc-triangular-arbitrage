@@ -35,6 +35,7 @@ const MAX_TRIANGLES = Number.POSITIVE_INFINITY;
 const SNAPSHOT_DELAY_MS = 300;
 const HEALTH_CHECK_INTERVAL_MS = 10_000;
 const STALE_BOOK_AFTER_MS = 5_000;
+const ZERO_FEE_EPSILON = 1e-12;
 
 const logger = pino({ level: config.logLevel });
 const rest = new MexcRestClient();
@@ -54,9 +55,15 @@ async function main(): Promise<void> {
     );
   }
 
+  if (!config.mexc.apiKey || !config.mexc.apiSecret) {
+    throw new Error(
+      'MEXC_API_KEY and MEXC_API_SECRET are required for zero-fee-only mode.'
+    );
+  }
+
   logger.info(
     { startAsset: config.trading.startAsset },
-    'Starting arbitrage bot'
+    'Starting zero-fee triangular arbitrage scanner'
   );
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
@@ -113,20 +120,12 @@ async function main(): Promise<void> {
   );
 
   if (triangles.length === 0) {
-    logger.warn(
-      {
-        startAsset: config.trading.startAsset,
-        liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
-      },
-      'No triangles found for allowed assets'
-    );
-
     throw new Error(
       `No liquid triangles found for ${config.trading.startAsset}`
     );
   }
 
-  const usedSymbols = [
+  const candidateSymbols = [
     ...new Set(
       triangles.flatMap((triangle) =>
         triangle.legs.map((leg) => leg.symbol)
@@ -137,10 +136,68 @@ async function main(): Promise<void> {
   logger.info(
     {
       selectedTriangles: triangles.length,
+      candidatePairs: candidateSymbols.length,
+      candidateSymbols
+    },
+    'Loading account fees for candidate pairs'
+  );
+
+  const authenticatedClient = new MexcAuthenticatedClient();
+
+  const takerFeesBySymbol = await new MexcTradeFeeLoader(
+    authenticatedClient,
+    logger
+  ).loadTakerFees(candidateSymbols);
+
+  const zeroFeeSymbols = [...takerFeesBySymbol.entries()]
+    .filter(([, feeRate]) => Math.abs(feeRate) <= ZERO_FEE_EPSILON)
+    .map(([symbol]) => symbol);
+
+  const zeroFeeTriangles = triangles.filter((triangle) =>
+    triangle.legs.every((leg) => {
+      const feeRate = takerFeesBySymbol.get(leg.symbol.toUpperCase());
+
+      return (
+        feeRate !== undefined &&
+        Math.abs(feeRate) <= ZERO_FEE_EPSILON
+      );
+    })
+  );
+
+  logger.info(
+    {
+      symbolsWithAccountFees: takerFeesBySymbol.size,
+      zeroFeeSymbols,
+      candidateTrianglesCount: triangles.length,
+      zeroFeeTrianglesCount: zeroFeeTriangles.length,
+      zeroFeeTriangleIds: zeroFeeTriangles.map(
+        (triangle) => triangle.id
+      )
+    },
+    'Filtered fully zero-fee triangles'
+  );
+
+  if (zeroFeeTriangles.length === 0) {
+    throw new Error(
+      'No fully zero-fee triangles found for this account. Do not use fallback fees in zero-fee-only mode.'
+    );
+  }
+
+  const usedSymbols = [
+    ...new Set(
+      zeroFeeTriangles.flatMap((triangle) =>
+        triangle.legs.map((leg) => leg.symbol)
+      )
+    )
+  ];
+
+  logger.info(
+    {
+      selectedTriangles: zeroFeeTriangles.length,
       subscribedPairs: usedSymbols.length,
       usedSymbols
     },
-    'Arbitrage scanner initialized'
+    'Zero-fee arbitrage scanner initialized'
   );
 
   const books = new Map<string, OrderBook>();
@@ -174,13 +231,13 @@ async function main(): Promise<void> {
     await sleep(SNAPSHOT_DELAY_MS);
   }
 
-  const readyTriangles = triangles.filter((triangle) =>
+  const readyTriangles = zeroFeeTriangles.filter((triangle) =>
     triangle.legs.every((leg) => books.has(leg.symbol))
   );
 
   if (readyTriangles.length === 0) {
     throw new Error(
-      'No triangles with fully initialized order books. Check MEXC REST permissions and rate limits.'
+      'No zero-fee triangles with fully initialized order books.'
     );
   }
 
@@ -194,45 +251,16 @@ async function main(): Promise<void> {
 
   logger.info(
     {
-      requestedTriangles: triangles.length,
-      readyTriangles: readyTriangles.length,
+      requestedZeroFeeTriangles: zeroFeeTriangles.length,
+      readyZeroFeeTriangles: readyTriangles.length,
       loadedBooks: books.size,
       subscribedPairs: readySymbols.length,
       readySymbols
     },
-    'Order books initialized'
+    'Zero-fee order books initialized'
   );
-
-  let takerFeesBySymbol = new Map<string, number>();
-
-  if (config.mexc.apiKey && config.mexc.apiSecret) {
-    const authenticatedClient = new MexcAuthenticatedClient();
-
-    takerFeesBySymbol = await new MexcTradeFeeLoader(
-      authenticatedClient,
-      logger
-    ).loadTakerFees(readySymbols);
-  } else {
-    logger.warn(
-      {
-        fallbackTakerFeeRate: config.trading.takerFeeRate
-      },
-      'MEXC API credentials are absent; using fallback taker fee for all symbols'
-    );
-  }
 
   const calculator = new ArbitrageCalculator(takerFeesBySymbol);
-
-  logger.info(
-    {
-      symbolsWithAccountFees: takerFeesBySymbol.size,
-      zeroFeeSymbols: [...takerFeesBySymbol.entries()]
-        .filter(([, feeRate]) => feeRate === 0)
-        .map(([symbol]) => symbol),
-      fallbackTakerFeeRate: config.trading.takerFeeRate
-    },
-    'Initialized symbol-specific taker fees'
-  );
 
   const opportunityService = new OpportunityService(
     readyTriangles,
@@ -261,7 +289,7 @@ async function main(): Promise<void> {
             levelsUsed: leg.levelsUsed
           }))
         },
-        'Paper arbitrage opportunity'
+        'Zero-fee paper arbitrage opportunity'
       );
 
       await repository.saveOpportunity(opportunity);
@@ -325,7 +353,7 @@ async function main(): Promise<void> {
           lastUpdateId: snapshot.lastUpdateId
         }))
       },
-      'Order book health'
+      'Zero-fee order book health'
     );
   }, HEALTH_CHECK_INTERVAL_MS);
 
