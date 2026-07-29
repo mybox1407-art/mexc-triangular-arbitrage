@@ -164,8 +164,7 @@ async function main(): Promise<void> {
 
   const calculator = new ArbitrageCalculator();
 
-  // Не даёт нескольким WS-delta одновременно вызвать REST reload
-  // одной и той же книги.
+  // Один одновременный REST reload на символ — защита от 429.
   const snapshotReloadsInFlight = new Set<string>();
 
   const opportunityService = new OpportunityService(
@@ -194,18 +193,18 @@ async function main(): Promise<void> {
         return;
       }
 
-      const lastUpdateId = book.lastUpdateId;
+      const lastUpdateId = book.getSnapshot(1).lastUpdateId;
 
-      // REST snapshot или уже применённая delta новее данного события.
-      // Это штатное старое WS-сообщение, а не рассинхронизация.
+      // Сообщение уже включено в snapshot или ранее применённые WS-delta.
+      // Это нормально: не вызываем REST и не считаем книгу stale.
       if (delta.toVersion <= lastUpdateId) {
         return;
       }
 
       const expectedNextVersion = lastUpdateId + 1;
 
-      // После загрузки snapshot первый валидный delta может охватывать
-      // его lastUpdateId: fromVersion <= expectedNextVersion <= toVersion.
+      // Первый delta после REST snapshot может пересекать snapshot:
+      // fromVersion <= lastUpdateId + 1 <= toVersion.
       const canApply =
         delta.fromVersion <= expectedNextVersion &&
         delta.toVersion >= expectedNextVersion;
@@ -248,7 +247,7 @@ async function main(): Promise<void> {
         logger.warn(
           {
             symbol: delta.symbol,
-            lastUpdateId: book.lastUpdateId,
+            lastUpdateId: book.getSnapshot(1).lastUpdateId,
             fromVersion: delta.fromVersion,
             toVersion: delta.toVersion
           },
