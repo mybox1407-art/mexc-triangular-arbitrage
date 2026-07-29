@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
 import type { Opportunity, Triangle } from '../domain/types.js';
 import { ArbitrageCalculator } from './ArbitrageCalculator.js';
+import { CsvBestRouteWriter } from './CsvBestRouteWriter.js';
 
 type Diagnostics = {
   evaluated: number;
@@ -13,6 +14,10 @@ type Diagnostics = {
 
 export class OpportunityService {
   private readonly lastReported = new Map<string, number>();
+
+  private readonly bestRouteWriter = new CsvBestRouteWriter(
+    config.csvBestRoutesPath
+  );
 
   private diagnostics: Diagnostics = {
     evaluated: 0,
@@ -108,6 +113,12 @@ export class OpportunityService {
       takerFeeRate: config.trading.takerFeeRate,
       safetyBufferRate: config.trading.safetyBufferRate
     });
+
+    if (best) {
+      void this.bestRouteWriter.write(best).catch((error) => {
+        console.error('Failed to write best paper route CSV', error);
+      });
+    }
 
     this.diagnostics = {
       evaluated: 0,
