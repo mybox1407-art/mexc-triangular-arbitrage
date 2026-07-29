@@ -92,7 +92,9 @@ export class CsvBestRouteWriter {
   }
 
   private async ensureFile(): Promise<void> {
-    if (this.initialized) return;
+    if (this.initialized) {
+      return;
+    }
 
     await mkdir(dirname(this.filePath), { recursive: true });
 
