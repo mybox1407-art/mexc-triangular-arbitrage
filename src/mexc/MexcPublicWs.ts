@@ -7,13 +7,23 @@ export type DepthHandler = (message: {
   toVersion: number;
   bids: [string, string][];
   asks: [string, string][];
-}) => void;
+}) => void | Promise<void>;
+
+type WsConnection = {
+  ws: WebSocket;
+  pingTimer?: NodeJS.Timeout;
+};
+
+const MAX_SUBSCRIPTIONS_PER_SOCKET = 30;
+const RECONNECT_DELAY_MS = 1_500;
+const PING_INTERVAL_MS = 20_000;
 
 export class MexcPublicWs {
-  private ws?: WebSocket;
-  private pingTimer?: NodeJS.Timeout;
+  private readonly connections: WsConnection[] = [];
   private reconnectTimer?: NodeJS.Timeout;
   private stopped = false;
+  private receivedMessages = 0;
+  private appliedDepthMessages = 0;
 
   constructor(
     private readonly symbols: string[],
@@ -24,61 +34,127 @@ export class MexcPublicWs {
 
   connect(): void {
     this.stopped = false;
-    this.open();
+
+    const groups = this.chunkSymbols(this.symbols, MAX_SUBSCRIPTIONS_PER_SOCKET);
+
+    for (const group of groups) {
+      this.open(group);
+    }
   }
 
   stop(): void {
     this.stopped = true;
-    clearInterval(this.pingTimer);
     clearTimeout(this.reconnectTimer);
-    this.ws?.close();
+
+    for (const connection of this.connections) {
+      clearInterval(connection.pingTimer);
+
+      if (
+        connection.ws.readyState === WebSocket.OPEN ||
+        connection.ws.readyState === WebSocket.CONNECTING
+      ) {
+        connection.ws.close();
+      }
+    }
+
+    this.connections.length = 0;
   }
 
-  private open(): void {
-    this.ws = new WebSocket(config.mexc.wsUrl);
+  private open(symbols: string[]): void {
+    const ws = new WebSocket(config.mexc.wsUrl);
+    const connection: WsConnection = { ws };
 
-    this.ws.on('open', () => {
-      this.subscribeDepth();
-      this.startPing();
+    this.connections.push(connection);
+
+    ws.on('open', () => {
+      this.subscribeDepth(connection, symbols);
+      this.startPing(connection);
+
+      console.log(JSON.stringify({
+        msg: 'MEXC WebSocket connection opened',
+        symbols: symbols.length,
+        sampleSymbols: symbols.slice(0, 5)
+      }));
+
       this.onOpen?.();
     });
 
-    this.ws.on('message', (raw) => {
+    ws.on('message', (raw, isBinary) => {
+      this.receivedMessages += 1;
+
+      if (isBinary) {
+        console.warn(JSON.stringify({
+          msg: 'Unexpected binary MEXC WS message on JSON topic',
+          bytes: raw.length
+        }));
+        return;
+      }
+
       this.handleMessage(raw.toString());
     });
 
-    this.ws.on('close', () => {
-      clearInterval(this.pingTimer);
+    ws.on('close', (code, reason) => {
+      clearInterval(connection.pingTimer);
+
+      const index = this.connections.indexOf(connection);
+      if (index >= 0) {
+        this.connections.splice(index, 1);
+      }
+
+      console.warn(JSON.stringify({
+        msg: 'MEXC WebSocket connection closed',
+        code,
+        reason: reason.toString(),
+        symbols: symbols.length
+      }));
+
       this.onClose?.();
 
       if (!this.stopped) {
-        this.reconnectTimer = setTimeout(() => this.open(), 1_500);
+        this.reconnectTimer = setTimeout(
+          () => this.open(symbols),
+          RECONNECT_DELAY_MS
+        );
       }
     });
 
-    this.ws.on('error', () => {
-      this.ws?.close();
+    ws.on('error', (error) => {
+      console.error(JSON.stringify({
+        msg: 'MEXC WebSocket error',
+        error: error.message,
+        symbols: symbols.length
+      }));
+
+      ws.close();
     });
   }
 
-  private subscribeDepth(): void {
-    for (const symbol of this.symbols) {
-      this.send({
+  private subscribeDepth(connection: WsConnection, symbols: string[]): void {
+    for (const symbol of symbols) {
+      this.send(connection.ws, {
         method: 'SUBSCRIPTION',
-        params: [`spot@public.aggre.depth.v3.api.pb@100ms@${symbol}`]
+        params: [`spot@public.aggre.depth.v3.api@100ms@${symbol.toUpperCase()}`]
       });
     }
+
+    console.log(JSON.stringify({
+      msg: 'MEXC depth subscriptions sent',
+      count: symbols.length,
+      topics: symbols.slice(0, 5).map(
+        (symbol) => `spot@public.aggre.depth.v3.api@100ms@${symbol.toUpperCase()}`
+      )
+    }));
   }
 
-  private startPing(): void {
-    this.pingTimer = setInterval(() => {
-      this.send({ method: 'PING' });
-    }, 20_000);
+  private startPing(connection: WsConnection): void {
+    connection.pingTimer = setInterval(() => {
+      this.send(connection.ws, { method: 'PING' });
+    }, PING_INTERVAL_MS);
   }
 
-  private send(payload: unknown): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(payload));
+  private send(ws: WebSocket, payload: unknown): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(payload));
     }
   }
 
@@ -88,13 +164,19 @@ export class MexcPublicWs {
     try {
       payload = JSON.parse(raw);
     } catch {
+      console.warn(JSON.stringify({
+        msg: 'Cannot parse MEXC WS JSON message',
+        preview: raw.slice(0, 300)
+      }));
       return;
     }
 
     const depth = payload?.d?.publicAggreDepths ?? payload?.publicAggreDepths;
-    const symbol = payload?.s ?? payload?.symbol;
+    const symbol = String(payload?.s ?? payload?.symbol ?? '').toUpperCase();
 
-    if (!depth || !symbol) return;
+    if (!depth || !symbol) {
+      return;
+    }
 
     const bids = (depth.bids ?? []).map((item: any) => [
       String(item.price ?? item[0]),
@@ -106,12 +188,61 @@ export class MexcPublicWs {
       String(item.quantity ?? item[1])
     ]) as [string, string][];
 
-    this.onDepth({
-      symbol,
-      fromVersion: Number(depth.fromVersion),
-      toVersion: Number(depth.toVersion),
-      bids,
-      asks
+    const fromVersion = Number(
+      depth.fromVersion ?? depth.fromVersionId ?? depth.version ?? 0
+    );
+    const toVersion = Number(
+      depth.toVersion ?? depth.toVersionId ?? depth.version ?? 0
+    );
+
+    if (!Number.isFinite(toVersion) || toVersion <= 0) {
+      console.warn(JSON.stringify({
+        msg: 'MEXC depth message has no valid version',
+        symbol,
+        preview: raw.slice(0, 500)
+      }));
+      return;
+    }
+
+    this.appliedDepthMessages += 1;
+
+    if (this.appliedDepthMessages % 100 === 0) {
+      console.log(JSON.stringify({
+        msg: 'MEXC depth updates received',
+        receivedMessages: this.receivedMessages,
+        appliedDepthMessages: this.appliedDepthMessages,
+        symbol,
+        fromVersion,
+        toVersion,
+        bids: bids.length,
+        asks: asks.length
+      }));
+    }
+
+    void Promise.resolve(
+      this.onDepth({
+        symbol,
+        fromVersion,
+        toVersion,
+        bids,
+        asks
+      })
+    ).catch((error) => {
+      console.error(JSON.stringify({
+        msg: 'Depth handler failed',
+        symbol,
+        error: error instanceof Error ? error.message : String(error)
+      }));
     });
+  }
+
+  private chunkSymbols(items: string[], size: number): string[][] {
+    const chunks: string[][] = [];
+
+    for (let index = 0; index < items.length; index += size) {
+      chunks.push(items.slice(index, index + size));
+    }
+
+    return chunks;
   }
 }
