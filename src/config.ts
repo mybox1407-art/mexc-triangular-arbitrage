@@ -52,6 +52,13 @@ export const config = {
     '/app/data/paper-opportunities.csv'
   ),
 
+  // CSV со лучшим маршрутом за каждый 10-секундный интервал.
+  csvBestRoutesPath: env(
+    'CSV_BEST_ROUTES_PATH',
+    '/app/data/paper-best-routes.csv'
+  ),
+
+
   mexc: {
     restUrl: env('MEXC_REST_URL', 'https://api.mexc.com'),
     wsUrl: env('MEXC_WS_URL', 'wss://wbs-api.mexc.com/ws'),
