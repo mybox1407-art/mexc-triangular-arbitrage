@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { OrderBook } from '../domain/orderBook.js';
 import type {
   BookLevel,
   Opportunity,
@@ -6,9 +7,12 @@ import type {
   Triangle,
   TriangleLeg
 } from '../domain/types.js';
-import { OrderBook } from '../domain/orderBook.js';
 
 export class ArbitrageCalculator {
+  constructor(
+    private readonly takerFeesBySymbol = new Map<string, number>()
+  ) {}
+
   simulate(
     triangle: Triangle,
     books: Map<string, OrderBook>,
@@ -19,19 +23,28 @@ export class ArbitrageCalculator {
 
     for (const leg of triangle.legs) {
       const book = books.get(leg.symbol);
-      if (!book) return null;
+
+      if (!book) {
+        return null;
+      }
 
       const snapshot = book.getSnapshot(100);
-      if (!snapshot.ready) return null;
+
+      if (!snapshot.ready) {
+        return null;
+      }
 
       const result = this.simulateLeg(
         leg,
         snapshot.bids,
         snapshot.asks,
-        amount
+        amount,
+        this.getTakerFeeRate(leg.symbol)
       );
 
-      if (!result) return null;
+      if (!result) {
+        return null;
+      }
 
       amount = result.outputAmount;
       simulatedLegs.push(result);
@@ -54,17 +67,33 @@ export class ArbitrageCalculator {
     };
   }
 
+  private getTakerFeeRate(symbol: string): number {
+    const feeRate = this.takerFeesBySymbol.get(symbol.toUpperCase());
+
+    if (
+      feeRate === undefined ||
+      !Number.isFinite(feeRate) ||
+      feeRate < 0
+    ) {
+      return config.trading.takerFeeRate;
+    }
+
+    return feeRate;
+  }
+
   private simulateLeg(
     leg: TriangleLeg,
     bids: BookLevel[],
     asks: BookLevel[],
-    inputAmount: number
+    inputAmount: number,
+    feeRate: number
   ): SimulatedLeg | null {
-    const feeRate = config.trading.takerFeeRate;
-
     if (leg.side === 'BUY') {
       const execution = this.buyWithQuote(asks, inputAmount);
-      if (!execution) return null;
+
+      if (!execution) {
+        return null;
+      }
 
       const feePaidInOutput = execution.baseAmount * feeRate;
       const outputAmount = execution.baseAmount - feePaidInOutput;
@@ -87,7 +116,10 @@ export class ArbitrageCalculator {
     }
 
     const execution = this.sellBase(bids, inputAmount);
-    if (!execution) return null;
+
+    if (!execution) {
+      return null;
+    }
 
     const feePaidInOutput = execution.quoteReceived * feeRate;
     const outputAmount = execution.quoteReceived - feePaidInOutput;
@@ -127,8 +159,13 @@ export class ArbitrageCalculator {
     let levelsUsed = 0;
 
     for (const level of asks) {
-      if (quoteLeft <= 1e-12) break;
-      if (level.price <= 0 || level.quantity <= 0) continue;
+      if (quoteLeft <= 1e-12) {
+        break;
+      }
+
+      if (level.price <= 0 || level.quantity <= 0) {
+        continue;
+      }
 
       const maxQuoteAtLevel = level.price * level.quantity;
       const quoteAtLevel = Math.min(quoteLeft, maxQuoteAtLevel);
@@ -167,8 +204,13 @@ export class ArbitrageCalculator {
     let levelsUsed = 0;
 
     for (const level of bids) {
-      if (baseLeft <= 1e-12) break;
-      if (level.price <= 0 || level.quantity <= 0) continue;
+      if (baseLeft <= 1e-12) {
+        break;
+      }
+
+      if (level.price <= 0 || level.quantity <= 0) {
+        continue;
+      }
 
       const baseAtLevel = Math.min(baseLeft, level.quantity);
 
