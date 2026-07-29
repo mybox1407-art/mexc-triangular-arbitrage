@@ -24,7 +24,13 @@ export class ArbitrageCalculator {
       const snapshot = book.getSnapshot(100);
       if (!snapshot.ready) return null;
 
-      const result = this.simulateLeg(leg, snapshot.bids, snapshot.asks, amount);
+      const result = this.simulateLeg(
+        leg,
+        snapshot.bids,
+        snapshot.asks,
+        amount
+      );
+
       if (!result) return null;
 
       amount = result.outputAmount;
@@ -61,6 +67,11 @@ export class ArbitrageCalculator {
       if (!execution) return null;
 
       const feePaidInOutput = execution.baseAmount * feeRate;
+      const outputAmount = execution.baseAmount - feePaidInOutput;
+
+      if (!Number.isFinite(outputAmount) || outputAmount <= 0) {
+        return null;
+      }
 
       return {
         symbol: leg.symbol,
@@ -68,7 +79,7 @@ export class ArbitrageCalculator {
         fromAsset: leg.fromAsset,
         toAsset: leg.toAsset,
         inputAmount,
-        outputAmount: execution.baseAmount - feePaidInOutput,
+        outputAmount,
         vwap: execution.quoteSpent / execution.baseAmount,
         feePaidInOutput,
         levelsUsed: execution.levelsUsed
@@ -79,6 +90,11 @@ export class ArbitrageCalculator {
     if (!execution) return null;
 
     const feePaidInOutput = execution.quoteReceived * feeRate;
+    const outputAmount = execution.quoteReceived - feePaidInOutput;
+
+    if (!Number.isFinite(outputAmount) || outputAmount <= 0) {
+      return null;
+    }
 
     return {
       symbol: leg.symbol,
@@ -86,7 +102,7 @@ export class ArbitrageCalculator {
       fromAsset: leg.fromAsset,
       toAsset: leg.toAsset,
       inputAmount,
-      outputAmount: execution.quoteReceived - feePaidInOutput,
+      outputAmount,
       vwap: execution.quoteReceived / inputAmount,
       feePaidInOutput,
       levelsUsed: execution.levelsUsed
@@ -96,7 +112,15 @@ export class ArbitrageCalculator {
   private buyWithQuote(
     asks: BookLevel[],
     quoteAmount: number
-  ): { baseAmount: number; quoteSpent: number; levelsUsed: number } | null {
+  ): {
+    baseAmount: number;
+    quoteSpent: number;
+    levelsUsed: number;
+  } | null {
+    if (!Number.isFinite(quoteAmount) || quoteAmount <= 0) {
+      return null;
+    }
+
     let quoteLeft = quoteAmount;
     let baseAmount = 0;
     let quoteSpent = 0;
@@ -104,6 +128,7 @@ export class ArbitrageCalculator {
 
     for (const level of asks) {
       if (quoteLeft <= 1e-12) break;
+      if (level.price <= 0 || level.quantity <= 0) continue;
 
       const maxQuoteAtLevel = level.price * level.quantity;
       const quoteAtLevel = Math.min(quoteLeft, maxQuoteAtLevel);
@@ -115,21 +140,35 @@ export class ArbitrageCalculator {
       levelsUsed += 1;
     }
 
-    if (quoteLeft > 1e-8 || baseAmount <= 0) return null;
+    if (quoteLeft > 1e-8 || baseAmount <= 0 || quoteSpent <= 0) {
+      return null;
+    }
 
-    return { baseAmount, quoteSpent, levelsUsed };
+    return {
+      baseAmount,
+      quoteSpent,
+      levelsUsed
+    };
   }
 
   private sellBase(
     bids: BookLevel[],
     baseAmount: number
-  ): { quoteReceived: number; levelsUsed: number } | null {
+  ): {
+    quoteReceived: number;
+    levelsUsed: number;
+  } | null {
+    if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
+      return null;
+    }
+
     let baseLeft = baseAmount;
     let quoteReceived = 0;
     let levelsUsed = 0;
 
     for (const level of bids) {
       if (baseLeft <= 1e-12) break;
+      if (level.price <= 0 || level.quantity <= 0) continue;
 
       const baseAtLevel = Math.min(baseLeft, level.quantity);
 
@@ -138,8 +177,13 @@ export class ArbitrageCalculator {
       levelsUsed += 1;
     }
 
-    if (baseLeft > 1e-8 || quoteReceived <= 0) return null;
+    if (baseLeft > 1e-8 || quoteReceived <= 0) {
+      return null;
+    }
 
-    return { quoteReceived, levelsUsed };
+    return {
+      quoteReceived,
+      levelsUsed
+    };
   }
 }
