@@ -2,10 +2,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import protobuf from 'protobufjs';
 
-export type MexcDepthDelta = {
+export type MexcDepthSnapshot = {
   symbol: string;
-  fromVersion: number;
-  toVersion: number;
+  version: number;
   bids: [string, string][];
   asks: [string, string][];
 };
@@ -25,47 +24,53 @@ export class MexcProtoDecoder {
 
     await root.load([
       path.join(protoDir, 'PushDataV3ApiWrapper.proto'),
-      path.join(protoDir, 'PublicAggreDepthsV3Api.proto')
+      path.join(protoDir, 'PublicLimitDepthsV3Api.proto')
     ]);
 
     root.resolveAll();
 
-    const wrapperType = root.lookupType('PushDataV3ApiWrapper');
-
-    return new MexcProtoDecoder(wrapperType);
+    return new MexcProtoDecoder(
+      root.lookupType('PushDataV3ApiWrapper')
+    );
   }
 
-  decodeAggreDepth(buffer: Buffer): MexcDepthDelta | null {
-    const wrapper = this.wrapperType.decode(buffer) as any;
+  decodeLimitDepth(raw: Buffer): MexcDepthSnapshot | null {
+    const wrapper = this.wrapperType.decode(raw) as any;
 
     const symbol = String(wrapper.symbol ?? '').toUpperCase();
-    const depth = wrapper.publicAggreDepths;
+    const depth = wrapper.publicLimitDepths;
 
     if (!symbol || !depth) {
       return null;
     }
 
-    const bids = (depth.bids ?? []).map((item: any) => [
-      String(item.price ?? ''),
-      String(item.quantity ?? '')
-    ]) as [string, string][];
+    const bids = (depth.bids ?? [])
+      .map((item: any) => [
+        String(item.price ?? ''),
+        String(item.quantity ?? '')
+      ] as [string, string])
+      .filter(([price, quantity]: [string, string]) =>
+        Number(price) > 0 && Number(quantity) > 0
+      );
 
-    const asks = (depth.asks ?? []).map((item: any) => [
-      String(item.price ?? ''),
-      String(item.quantity ?? '')
-    ]) as [string, string][];
+    const asks = (depth.asks ?? [])
+      .map((item: any) => [
+        String(item.price ?? ''),
+        String(item.quantity ?? '')
+      ] as [string, string])
+      .filter(([price, quantity]: [string, string]) =>
+        Number(price) > 0 && Number(quantity) > 0
+      );
 
-    const fromVersion = Number(depth.fromVersion ?? 0);
-    const toVersion = Number(depth.toVersion ?? 0);
+    const version = Number(depth.version ?? 0);
 
-    if (!Number.isFinite(toVersion) || toVersion <= 0) {
+    if (!Number.isFinite(version) || version <= 0) {
       return null;
     }
 
     return {
       symbol,
-      fromVersion,
-      toVersion,
+      version,
       bids,
       asks
     };
