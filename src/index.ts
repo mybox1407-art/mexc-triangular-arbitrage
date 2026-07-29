@@ -164,9 +164,6 @@ async function main(): Promise<void> {
 
   const calculator = new ArbitrageCalculator();
 
-  // Один одновременный REST reload на символ — защита от 429.
-  const snapshotReloadsInFlight = new Set<string>();
-
   const opportunityService = new OpportunityService(
     readyTriangles,
     books,
@@ -186,79 +183,23 @@ async function main(): Promise<void> {
 
   const ws = new MexcPublicWs(
     readySymbols,
-    async (delta) => {
-      const book = books.get(delta.symbol);
+    async (depth) => {
+      const book = books.get(depth.symbol);
 
       if (!book) {
         return;
       }
 
-      const lastUpdateId = book.getSnapshot(1).lastUpdateId;
-
-      // Сообщение уже включено в snapshot или ранее применённые WS-delta.
-      // Это нормально: не вызываем REST и не считаем книгу stale.
-      if (delta.toVersion <= lastUpdateId) {
-        return;
-      }
-
-      const expectedNextVersion = lastUpdateId + 1;
-
-      // Первый delta после REST snapshot может пересекать snapshot:
-      // fromVersion <= lastUpdateId + 1 <= toVersion.
-      const canApply =
-        delta.fromVersion <= expectedNextVersion &&
-        delta.toVersion >= expectedNextVersion;
-
-      if (!canApply) {
-        if (snapshotReloadsInFlight.has(delta.symbol)) {
-          return;
-        }
-
-        snapshotReloadsInFlight.add(delta.symbol);
-
-        logger.warn(
-          {
-            symbol: delta.symbol,
-            lastUpdateId,
-            fromVersion: delta.fromVersion,
-            toVersion: delta.toVersion
-          },
-          'Order book sequence gap; loading one fresh snapshot'
-        );
-
-        try {
-          const snapshot = await rest.getDepth(delta.symbol, 100);
-          book.loadSnapshot(snapshot);
-        } catch (error) {
-          logger.error(
-            { err: error, symbol: delta.symbol },
-            'Cannot reload order book'
-          );
-        } finally {
-          snapshotReloadsInFlight.delete(delta.symbol);
-        }
-
-        return;
-      }
-
-      const applied = book.applyDelta(delta);
-
-      if (!applied) {
-        logger.warn(
-          {
-            symbol: delta.symbol,
-            lastUpdateId: book.getSnapshot(1).lastUpdateId,
-            fromVersion: delta.fromVersion,
-            toVersion: delta.toVersion
-          },
-          'Order-book delta rejected after sequence validation'
-        );
-
-        return;
-      }
+      // limit-depth — это самостоятельный snapshot top-5.
+      // Не проверяем последовательность версий и не вызываем REST resync.
+      book.loadSnapshot({
+        lastUpdateId: depth.toVersion,
+        bids: depth.bids,
+        asks: depth.asks
+      });
 
       try {
-        await opportunityService.evaluateAffected(delta.symbol);
+        await opportunityService.evaluateAffected(depth.symbol);
       } catch (error) {
         logger.error({ err: error }, 'Opportunity evaluation failed');
       }
