@@ -9,13 +9,36 @@ import { ArbitrageCalculator } from './services/ArbitrageCalculator.js';
 import { OpportunityService } from './services/OpportunityService.js';
 import { TriangleBuilder } from './services/TriangleBuilder.js';
 
-const SNAPSHOT_CONCURRENCY = 10;
+const ALLOWED_ASSETS = new Set([
+  'USDT',
+  'USDC',
+  'BTC',
+  'ETH',
+  'SOL',
+  'XRP',
+  'DOGE',
+  'LTC',
+  'BCH',
+  'TRX',
+  'ADA',
+  'LINK',
+  'AVAX',
+  'DOT',
+  'TON',
+  'BNB'
+]);
+
+const MAX_TRIANGLES = 30;
+const SNAPSHOT_DELAY_MS = 300;
 const HEALTH_CHECK_INTERVAL_MS = 10_000;
 const STALE_BOOK_AFTER_MS = 5_000;
 
 const logger = pino({ level: config.logLevel });
 const rest = new MexcRestClient();
 const repository = new ArbitrageRepository(config.databaseUrl);
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main(): Promise<void> {
   if (config.trading.liveTrading) {
@@ -36,20 +59,33 @@ async function main(): Promise<void> {
       quoteAsset: symbol.quoteAsset,
       status: symbol.status,
       isSpotTradingAllowed: symbol.isSpotTradingAllowed
-    })),
-    uniqueBaseAssets: [...new Set(symbols.map((symbol) => symbol.baseAsset))].slice(0, 20),
-    uniqueQuoteAssets: [...new Set(symbols.map((symbol) => symbol.quoteAsset))].slice(0, 20)
+    }))
   }, 'Loaded symbols from MEXC');
 
-  const triangles = new TriangleBuilder().build(symbols, config.trading.startAsset);
+  const liquidSymbols = symbols.filter(
+    (symbol) =>
+      ALLOWED_ASSETS.has(symbol.baseAsset) &&
+      ALLOWED_ASSETS.has(symbol.quoteAsset)
+  );
 
   logger.info({
-    trianglesCount: triangles.length,
+    totalLiquidSymbols: liquidSymbols.length,
+    liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
+  }, 'Filtered liquid symbols');
+
+  const allTriangles = new TriangleBuilder().build(
+    liquidSymbols,
+    config.trading.startAsset
+  );
+
+  const triangles = allTriangles.slice(0, MAX_TRIANGLES);
+
+  logger.info({
+    allTrianglesCount: allTriangles.length,
+    selectedTrianglesCount: triangles.length,
     sampleTriangles: triangles.slice(0, 5).map((triangle) => ({
       id: triangle.id,
       startAsset: triangle.startAsset,
-      middleAsset1: triangle.middleAsset1,
-      middleAsset2: triangle.middleAsset2,
       legs: triangle.legs.map(
         (leg) => `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
       )
@@ -57,19 +93,12 @@ async function main(): Promise<void> {
   }, 'Built triangles');
 
   if (triangles.length === 0) {
-    const startAssetSymbols = symbols.filter(
-      (symbol) =>
-        symbol.quoteAsset === config.trading.startAsset ||
-        symbol.baseAsset === config.trading.startAsset
-    );
-
     logger.warn({
       startAsset: config.trading.startAsset,
-      symbolsWithStartAsset: startAssetSymbols.length,
-      sampleStartAssetSymbols: startAssetSymbols.slice(0, 10).map((symbol) => symbol.symbol)
-    }, 'No triangles found - diagnostic info');
+      liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
+    }, 'No triangles found for allowed assets');
 
-    throw new Error(`No triangles found for ${config.trading.startAsset}`);
+    throw new Error(`No liquid triangles found for ${config.trading.startAsset}`);
   }
 
   const usedSymbols = [
@@ -79,56 +108,64 @@ async function main(): Promise<void> {
   ];
 
   logger.info({
-    symbols: symbols.length,
-    triangles: triangles.length,
+    selectedTriangles: triangles.length,
     subscribedPairs: usedSymbols.length,
-    sampleUsedSymbols: usedSymbols.slice(0, 10)
+    usedSymbols
   }, 'Arbitrage scanner initialized');
 
   const books = new Map<string, OrderBook>();
 
-  for (
-    let startIndex = 0;
-    startIndex < usedSymbols.length;
-    startIndex += SNAPSHOT_CONCURRENCY
-  ) {
-    const batch = usedSymbols.slice(
-      startIndex,
-      startIndex + SNAPSHOT_CONCURRENCY
-    );
+  for (const symbol of usedSymbols) {
+    try {
+      const book = new OrderBook(symbol);
+      const snapshot = await rest.getDepth(symbol, 100);
 
-    const results = await Promise.allSettled(
-      batch.map(async (symbol) => {
-        const book = new OrderBook(symbol);
-        const snapshot = await rest.getDepth(symbol, 100);
+      book.loadSnapshot(snapshot);
+      books.set(symbol, book);
 
-        book.loadSnapshot(snapshot);
-        books.set(symbol, book);
-      })
-    );
-
-    const failed = results.filter((result) => result.status === 'rejected');
-
-    if (failed.length > 0) {
+      logger.info({
+        symbol,
+        loadedBooks: books.size,
+        totalBooks: usedSymbols.length
+      }, 'Order book snapshot loaded');
+    } catch (error) {
       logger.warn({
-        failed: failed.length,
-        batch
-      }, 'Some order book snapshots failed to load');
+        err: error,
+        symbol
+      }, 'Cannot load order book snapshot; symbol will be skipped');
     }
 
-    logger.info({
-      loaded: books.size,
-      total: usedSymbols.length,
-      failedInBatch: failed.length
-    }, 'Loading order book snapshots');
+    await sleep(SNAPSHOT_DELAY_MS);
   }
 
-  logger.info({ loadedBooks: books.size }, 'Order books initialized');
+  const readyTriangles = triangles.filter((triangle) =>
+    triangle.legs.every((leg) => books.has(leg.symbol))
+  );
+
+  if (readyTriangles.length === 0) {
+    throw new Error(
+      'No triangles with fully initialized order books. Check MEXC REST permissions and rate limits.'
+    );
+  }
+
+  const readySymbols = [
+    ...new Set(
+      readyTriangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol))
+    )
+  ];
+
+  logger.info({
+    requestedTriangles: triangles.length,
+    readyTriangles: readyTriangles.length,
+    loadedBooks: books.size,
+    subscribedPairs: readySymbols.length,
+    readySymbols
+  }, 'Order books initialized');
 
   const calculator = new ArbitrageCalculator();
 
   const opportunityService = new OpportunityService(
-    triangles,
+    readyTriangles,
     books,
     calculator,
     async (opportunity) => {
@@ -145,7 +182,7 @@ async function main(): Promise<void> {
   );
 
   const ws = new MexcPublicWs(
-    usedSymbols,
+    readySymbols,
     async (delta) => {
       const book = books.get(delta.symbol);
 
@@ -193,9 +230,7 @@ async function main(): Promise<void> {
       (snapshot) => now - snapshot.updatedAt > STALE_BOOK_AFTER_MS
     );
     const emptyBooks = snapshots.filter(
-      (snapshot) =>
-        snapshot.bids.length === 0 ||
-        snapshot.asks.length === 0
+      (snapshot) => snapshot.bids.length === 0 || snapshot.asks.length === 0
     );
 
     logger.info({
@@ -203,7 +238,7 @@ async function main(): Promise<void> {
       readyBooks: readyBooks.length,
       staleBooks: staleBooks.length,
       emptyBooks: emptyBooks.length,
-      sample: snapshots.slice(0, 3).map((snapshot) => ({
+      sample: snapshots.slice(0, 5).map((snapshot) => ({
         symbol: snapshot.symbol,
         ready: snapshot.ready,
         bid: snapshot.bids[0]?.price ?? null,
