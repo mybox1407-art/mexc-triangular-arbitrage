@@ -164,6 +164,10 @@ async function main(): Promise<void> {
 
   const calculator = new ArbitrageCalculator();
 
+  // Не даёт нескольким WS-delta одновременно вызвать REST reload
+  // одной и той же книги.
+  const snapshotReloadsInFlight = new Set<string>();
+
   const opportunityService = new OpportunityService(
     readyTriangles,
     books,
@@ -190,12 +194,37 @@ async function main(): Promise<void> {
         return;
       }
 
-      const applied = book.applyDelta(delta);
+      const lastUpdateId = book.lastUpdateId;
 
-      if (!applied) {
+      // REST snapshot или уже применённая delta новее данного события.
+      // Это штатное старое WS-сообщение, а не рассинхронизация.
+      if (delta.toVersion <= lastUpdateId) {
+        return;
+      }
+
+      const expectedNextVersion = lastUpdateId + 1;
+
+      // После загрузки snapshot первый валидный delta может охватывать
+      // его lastUpdateId: fromVersion <= expectedNextVersion <= toVersion.
+      const canApply =
+        delta.fromVersion <= expectedNextVersion &&
+        delta.toVersion >= expectedNextVersion;
+
+      if (!canApply) {
+        if (snapshotReloadsInFlight.has(delta.symbol)) {
+          return;
+        }
+
+        snapshotReloadsInFlight.add(delta.symbol);
+
         logger.warn(
-          { symbol: delta.symbol },
-          'Order book out of sync; loading fresh snapshot'
+          {
+            symbol: delta.symbol,
+            lastUpdateId,
+            fromVersion: delta.fromVersion,
+            toVersion: delta.toVersion
+          },
+          'Order book sequence gap; loading one fresh snapshot'
         );
 
         try {
@@ -206,7 +235,25 @@ async function main(): Promise<void> {
             { err: error, symbol: delta.symbol },
             'Cannot reload order book'
           );
+        } finally {
+          snapshotReloadsInFlight.delete(delta.symbol);
         }
+
+        return;
+      }
+
+      const applied = book.applyDelta(delta);
+
+      if (!applied) {
+        logger.warn(
+          {
+            symbol: delta.symbol,
+            lastUpdateId: book.lastUpdateId,
+            fromVersion: delta.fromVersion,
+            toVersion: delta.toVersion
+          },
+          'Order-book delta rejected after sequence validation'
+        );
 
         return;
       }
@@ -249,7 +296,7 @@ async function main(): Promise<void> {
     }, 'Order book health');
   }, HEALTH_CHECK_INTERVAL_MS);
 
-  ws.connect();
+  await ws.connect();
 
   const shutdown = async (): Promise<void> => {
     logger.info('Shutdown started');
