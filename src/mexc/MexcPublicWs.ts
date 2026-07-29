@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import { config } from '../config.js';
+import { MexcProtoDecoder } from './MexcProtoDecoder.js';
 
 export type DepthHandler = (message: {
   symbol: string;
@@ -11,6 +12,7 @@ export type DepthHandler = (message: {
 
 type WsConnection = {
   ws: WebSocket;
+  symbols: string[];
   pingTimer?: NodeJS.Timeout;
 };
 
@@ -20,9 +22,10 @@ const PING_INTERVAL_MS = 20_000;
 
 export class MexcPublicWs {
   private readonly connections: WsConnection[] = [];
+  private decoder?: MexcProtoDecoder;
   private stopped = false;
   private receivedMessages = 0;
-  private depthMessages = 0;
+  private decodedDepthMessages = 0;
 
   constructor(
     private readonly symbols: string[],
@@ -31,11 +34,14 @@ export class MexcPublicWs {
     private readonly onClose?: () => void
   ) {}
 
-  connect(): void {
+  async connect(): Promise<void> {
     this.stopped = false;
+    this.decoder = await MexcProtoDecoder.create();
 
-    for (const group of this.chunk(this.symbols, MAX_SUBSCRIPTIONS_PER_SOCKET)) {
-      this.open(group);
+    const groups = this.chunk(this.symbols, MAX_SUBSCRIPTIONS_PER_SOCKET);
+
+    for (const symbols of groups) {
+      this.open(symbols);
     }
   }
 
@@ -58,12 +64,12 @@ export class MexcPublicWs {
 
   private open(symbols: string[]): void {
     const ws = new WebSocket(config.mexc.wsUrl);
-    const connection: WsConnection = { ws };
+    const connection: WsConnection = { ws, symbols };
 
     this.connections.push(connection);
 
     ws.on('open', () => {
-      this.subscribeDepth(connection, symbols);
+      this.subscribeDepth(connection);
       this.startPing(connection);
 
       console.log(JSON.stringify({
@@ -78,22 +84,12 @@ export class MexcPublicWs {
     ws.on('message', (raw, isBinary) => {
       this.receivedMessages += 1;
 
-      if (isBinary) {
-        const bytes = Array.isArray(raw)
-          ? Buffer.concat(raw).length
-          : raw instanceof ArrayBuffer
-            ? raw.byteLength
-            : raw.length;
-
-        console.warn(JSON.stringify({
-          msg: 'Unexpected binary MEXC WS message on JSON topic',
-          bytes
-        }));
-
+      if (!isBinary) {
+        this.handleTextMessage(raw.toString());
         return;
       }
 
-      this.handleMessage(raw.toString());
+      this.handleBinaryMessage(raw);
     });
 
     ws.on('close', (code, reason) => {
@@ -129,23 +125,21 @@ export class MexcPublicWs {
     });
   }
 
-  private subscribeDepth(connection: WsConnection, symbols: string[]): void {
-    for (const symbol of symbols) {
-      this.send(connection.ws, {
-        method: 'SUBSCRIPTION',
-        params: [
-          `spot@public.aggre.depth.v3.api@100ms@${symbol.toUpperCase()}`
-        ]
-      });
-    }
+  private subscribeDepth(connection: WsConnection): void {
+    const params = connection.symbols.map(
+      (symbol) =>
+        `spot@public.aggre.depth.v3.api.pb@100ms@${symbol.toUpperCase()}`
+    );
+
+    this.send(connection.ws, {
+      method: 'SUBSCRIPTION',
+      params
+    });
 
     console.log(JSON.stringify({
-      msg: 'MEXC depth subscriptions sent',
-      count: symbols.length,
-      sampleTopics: symbols.slice(0, 5).map(
-        (symbol) =>
-          `spot@public.aggre.depth.v3.api@100ms@${symbol.toUpperCase()}`
-      )
+      msg: 'MEXC protobuf depth subscriptions sent',
+      count: params.length,
+      sampleTopics: params.slice(0, 5)
     }));
   }
 
@@ -161,96 +155,80 @@ export class MexcPublicWs {
     }
   }
 
-  private handleMessage(raw: string): void {
-    let payload: any;
-
+  private handleTextMessage(raw: string): void {
     try {
-      payload = JSON.parse(raw);
+      const payload = JSON.parse(raw);
+
+      if (payload?.code !== undefined && payload.code !== 0) {
+        console.error(JSON.stringify({
+          msg: 'MEXC WebSocket subscription error',
+          payload
+        }));
+      }
     } catch {
       console.warn(JSON.stringify({
-        msg: 'Cannot parse MEXC WebSocket JSON message',
+        msg: 'MEXC WebSocket unknown text message',
         preview: raw.slice(0, 300)
       }));
+    }
+  }
+
+  private handleBinaryMessage(raw: WebSocket.RawData): void {
+    if (!this.decoder) {
       return;
     }
 
-    const depth =
-      payload?.d?.publicAggreDepths ??
-      payload?.publicAggreDepths;
+    const buffer = this.toBuffer(raw);
 
-    const symbol = String(
-      payload?.s ??
-      payload?.symbol ??
-      ''
-    ).toUpperCase();
+    try {
+      const depth = this.decoder.decodeAggreDepth(buffer);
 
-    if (!depth || !symbol) {
-      return;
-    }
+      if (!depth) {
+        return;
+      }
 
-    const bids = (depth.bids ?? []).map((item: any) => [
-      String(item.price ?? item[0]),
-      String(item.quantity ?? item[1])
-    ]) as [string, string][];
+      this.decodedDepthMessages += 1;
 
-    const asks = (depth.asks ?? []).map((item: any) => [
-      String(item.price ?? item[0]),
-      String(item.quantity ?? item[1])
-    ]) as [string, string][];
+      if (this.decodedDepthMessages % 100 === 0) {
+        console.log(JSON.stringify({
+          msg: 'MEXC protobuf depth updates decoded',
+          receivedMessages: this.receivedMessages,
+          decodedDepthMessages: this.decodedDepthMessages,
+          symbol: depth.symbol,
+          fromVersion: depth.fromVersion,
+          toVersion: depth.toVersion,
+          bids: depth.bids.length,
+          asks: depth.asks.length
+        }));
+      }
 
-    const fromVersion = Number(
-      depth.fromVersion ??
-      depth.fromVersionId ??
-      depth.version ??
-      0
-    );
-
-    const toVersion = Number(
-      depth.toVersion ??
-      depth.toVersionId ??
-      depth.version ??
-      0
-    );
-
-    if (!Number.isFinite(toVersion) || toVersion <= 0) {
-      console.warn(JSON.stringify({
-        msg: 'MEXC depth message contains no valid version',
-        symbol,
-        preview: raw.slice(0, 500)
-      }));
-      return;
-    }
-
-    this.depthMessages += 1;
-
-    if (this.depthMessages % 100 === 0) {
-      console.log(JSON.stringify({
-        msg: 'MEXC depth updates received',
-        receivedMessages: this.receivedMessages,
-        depthMessages: this.depthMessages,
-        symbol,
-        fromVersion,
-        toVersion,
-        bids: bids.length,
-        asks: asks.length
-      }));
-    }
-
-    void Promise.resolve(
-      this.onDepth({
-        symbol,
-        fromVersion,
-        toVersion,
-        bids,
-        asks
-      })
-    ).catch((error) => {
+      void Promise.resolve(this.onDepth(depth)).catch((error) => {
+        console.error(JSON.stringify({
+          msg: 'MEXC depth handler failed',
+          symbol: depth.symbol,
+          error: error instanceof Error ? error.message : String(error)
+        }));
+      });
+    } catch (error) {
       console.error(JSON.stringify({
-        msg: 'Depth handler failed',
-        symbol,
-        error: error instanceof Error ? error.message : String(error)
+        msg: 'Cannot decode MEXC protobuf depth message',
+        error: error instanceof Error ? error.message : String(error),
+        bytes: buffer.length,
+        preview: buffer.subarray(0, 32).toString('hex')
       }));
-    });
+    }
+  }
+
+  private toBuffer(raw: WebSocket.RawData): Buffer {
+    if (Array.isArray(raw)) {
+      return Buffer.concat(raw);
+    }
+
+    if (raw instanceof ArrayBuffer) {
+      return Buffer.from(raw);
+    }
+
+    return raw;
   }
 
   private chunk(items: string[], chunkSize: number): string[][] {
