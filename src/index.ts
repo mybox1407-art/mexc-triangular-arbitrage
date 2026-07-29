@@ -6,6 +6,7 @@ import { MexcPublicWs } from './mexc/MexcPublicWs.js';
 import { MexcRestClient } from './mexc/MexcRestClient.js';
 import { ArbitrageRepository } from './repositories/ArbitrageRepository.js';
 import { ArbitrageCalculator } from './services/ArbitrageCalculator.js';
+import { CsvOpportunityWriter } from './services/CsvOpportunityWriter.js';
 import { OpportunityService } from './services/OpportunityService.js';
 import { TriangleBuilder } from './services/TriangleBuilder.js';
 
@@ -37,6 +38,10 @@ const logger = pino({ level: config.logLevel });
 const rest = new MexcRestClient();
 const repository = new ArbitrageRepository(config.databaseUrl);
 
+const csvWriter = new CsvOpportunityWriter(
+  config.csvOpportunitiesPath
+);
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -47,20 +52,26 @@ async function main(): Promise<void> {
     );
   }
 
-  logger.info({ startAsset: config.trading.startAsset }, 'Starting arbitrage bot');
+  logger.info(
+    { startAsset: config.trading.startAsset },
+    'Starting arbitrage bot'
+  );
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
 
-  logger.info({
-    totalSymbols: symbols.length,
-    sampleSymbols: symbols.slice(0, 5).map((symbol) => ({
-      symbol: symbol.symbol,
-      baseAsset: symbol.baseAsset,
-      quoteAsset: symbol.quoteAsset,
-      status: symbol.status,
-      isSpotTradingAllowed: symbol.isSpotTradingAllowed
-    }))
-  }, 'Loaded symbols from MEXC');
+  logger.info(
+    {
+      totalSymbols: symbols.length,
+      sampleSymbols: symbols.slice(0, 5).map((symbol) => ({
+        symbol: symbol.symbol,
+        baseAsset: symbol.baseAsset,
+        quoteAsset: symbol.quoteAsset,
+        status: symbol.status,
+        isSpotTradingAllowed: symbol.isSpotTradingAllowed
+      }))
+    },
+    'Loaded symbols from MEXC'
+  );
 
   const liquidSymbols = symbols.filter(
     (symbol) =>
@@ -68,10 +79,13 @@ async function main(): Promise<void> {
       ALLOWED_ASSETS.has(symbol.quoteAsset)
   );
 
-  logger.info({
-    totalLiquidSymbols: liquidSymbols.length,
-    liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
-  }, 'Filtered liquid symbols');
+  logger.info(
+    {
+      totalLiquidSymbols: liquidSymbols.length,
+      liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
+    },
+    'Filtered liquid symbols'
+  );
 
   const allTriangles = new TriangleBuilder().build(
     liquidSymbols,
@@ -80,38 +94,52 @@ async function main(): Promise<void> {
 
   const triangles = allTriangles.slice(0, MAX_TRIANGLES);
 
-  logger.info({
-    allTrianglesCount: allTriangles.length,
-    selectedTrianglesCount: triangles.length,
-    sampleTriangles: triangles.slice(0, 5).map((triangle) => ({
-      id: triangle.id,
-      startAsset: triangle.startAsset,
-      legs: triangle.legs.map(
-        (leg) => `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
-      )
-    }))
-  }, 'Built triangles');
+  logger.info(
+    {
+      allTrianglesCount: allTriangles.length,
+      selectedTrianglesCount: triangles.length,
+      sampleTriangles: triangles.slice(0, 5).map((triangle) => ({
+        id: triangle.id,
+        startAsset: triangle.startAsset,
+        legs: triangle.legs.map(
+          (leg) =>
+            `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
+        )
+      }))
+    },
+    'Built triangles'
+  );
 
   if (triangles.length === 0) {
-    logger.warn({
-      startAsset: config.trading.startAsset,
-      liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
-    }, 'No triangles found for allowed assets');
+    logger.warn(
+      {
+        startAsset: config.trading.startAsset,
+        liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
+      },
+      'No triangles found for allowed assets'
+    );
 
-    throw new Error(`No liquid triangles found for ${config.trading.startAsset}`);
+    throw new Error(
+      `No liquid triangles found for ${config.trading.startAsset}`
+    );
   }
 
   const usedSymbols = [
     ...new Set(
-      triangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol))
+      triangles.flatMap((triangle) =>
+        triangle.legs.map((leg) => leg.symbol)
+      )
     )
   ];
 
-  logger.info({
-    selectedTriangles: triangles.length,
-    subscribedPairs: usedSymbols.length,
-    usedSymbols
-  }, 'Arbitrage scanner initialized');
+  logger.info(
+    {
+      selectedTriangles: triangles.length,
+      subscribedPairs: usedSymbols.length,
+      usedSymbols
+    },
+    'Arbitrage scanner initialized'
+  );
 
   const books = new Map<string, OrderBook>();
 
@@ -123,16 +151,22 @@ async function main(): Promise<void> {
       book.loadSnapshot(snapshot);
       books.set(symbol, book);
 
-      logger.info({
-        symbol,
-        loadedBooks: books.size,
-        totalBooks: usedSymbols.length
-      }, 'Order book snapshot loaded');
+      logger.info(
+        {
+          symbol,
+          loadedBooks: books.size,
+          totalBooks: usedSymbols.length
+        },
+        'Order book snapshot loaded'
+      );
     } catch (error) {
-      logger.warn({
-        err: error,
-        symbol
-      }, 'Cannot load order book snapshot; symbol will be skipped');
+      logger.warn(
+        {
+          err: error,
+          symbol
+        },
+        'Cannot load order book snapshot; symbol will be skipped'
+      );
     }
 
     await sleep(SNAPSHOT_DELAY_MS);
@@ -150,17 +184,22 @@ async function main(): Promise<void> {
 
   const readySymbols = [
     ...new Set(
-      readyTriangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol))
+      readyTriangles.flatMap((triangle) =>
+        triangle.legs.map((leg) => leg.symbol)
+      )
     )
   ];
 
-  logger.info({
-    requestedTriangles: triangles.length,
-    readyTriangles: readyTriangles.length,
-    loadedBooks: books.size,
-    subscribedPairs: readySymbols.length,
-    readySymbols
-  }, 'Order books initialized');
+  logger.info(
+    {
+      requestedTriangles: triangles.length,
+      readyTriangles: readyTriangles.length,
+      loadedBooks: books.size,
+      subscribedPairs: readySymbols.length,
+      readySymbols
+    },
+    'Order books initialized'
+  );
 
   const calculator = new ArbitrageCalculator();
 
@@ -169,13 +208,30 @@ async function main(): Promise<void> {
     books,
     calculator,
     async (opportunity) => {
-      logger.info({
-        triangle: opportunity.triangleId,
-        start: opportunity.startAmount,
-        final: opportunity.finalAmount,
-        netRoiPct: Number((opportunity.netRoi * 100).toFixed(4)),
-        profit: opportunity.expectedProfit
-      }, 'Paper arbitrage opportunity');
+      await csvWriter.write(opportunity);
+
+      logger.info(
+        {
+          triangle: opportunity.triangleId,
+          startAsset: opportunity.startAsset,
+          start: opportunity.startAmount,
+          final: opportunity.finalAmount,
+          grossRoiPct: Number((opportunity.grossRoi * 100).toFixed(4)),
+          netRoiPct: Number((opportunity.netRoi * 100).toFixed(4)),
+          profit: opportunity.expectedProfit,
+          legs: opportunity.legs.map((leg) => ({
+            symbol: leg.symbol,
+            side: leg.side,
+            route: `${leg.fromAsset}->${leg.toAsset}`,
+            input: leg.inputAmount,
+            output: leg.outputAmount,
+            vwap: leg.vwap,
+            fee: leg.feePaidInOutput,
+            levelsUsed: leg.levelsUsed
+          }))
+        },
+        'Paper arbitrage opportunity'
+      );
 
       await repository.saveOpportunity(opportunity);
     }
@@ -190,8 +246,6 @@ async function main(): Promise<void> {
         return;
       }
 
-      // limit-depth — это самостоятельный snapshot top-5.
-      // Не проверяем последовательность версий и не вызываем REST resync.
       book.loadSnapshot({
         lastUpdateId: depth.toVersion,
         bids: depth.bids,
@@ -210,30 +264,38 @@ async function main(): Promise<void> {
 
   setInterval(() => {
     const now = Date.now();
-    const snapshots = [...books.values()].map((book) => book.getSnapshot(5));
+    const snapshots = [...books.values()].map((book) =>
+      book.getSnapshot(5)
+    );
 
     const readyBooks = snapshots.filter((snapshot) => snapshot.ready);
+
     const staleBooks = readyBooks.filter(
       (snapshot) => now - snapshot.updatedAt > STALE_BOOK_AFTER_MS
     );
+
     const emptyBooks = snapshots.filter(
-      (snapshot) => snapshot.bids.length === 0 || snapshot.asks.length === 0
+      (snapshot) =>
+        snapshot.bids.length === 0 || snapshot.asks.length === 0
     );
 
-    logger.info({
-      totalBooks: snapshots.length,
-      readyBooks: readyBooks.length,
-      staleBooks: staleBooks.length,
-      emptyBooks: emptyBooks.length,
-      sample: snapshots.slice(0, 5).map((snapshot) => ({
-        symbol: snapshot.symbol,
-        ready: snapshot.ready,
-        bid: snapshot.bids[0]?.price ?? null,
-        ask: snapshot.asks[0]?.price ?? null,
-        ageMs: now - snapshot.updatedAt,
-        lastUpdateId: snapshot.lastUpdateId
-      }))
-    }, 'Order book health');
+    logger.info(
+      {
+        totalBooks: snapshots.length,
+        readyBooks: readyBooks.length,
+        staleBooks: staleBooks.length,
+        emptyBooks: emptyBooks.length,
+        sample: snapshots.slice(0, 5).map((snapshot) => ({
+          symbol: snapshot.symbol,
+          ready: snapshot.ready,
+          bid: snapshot.bids[0]?.price ?? null,
+          ask: snapshot.asks[0]?.price ?? null,
+          ageMs: now - snapshot.updatedAt,
+          lastUpdateId: snapshot.lastUpdateId
+        }))
+      },
+      'Order book health'
+    );
   }, HEALTH_CHECK_INTERVAL_MS);
 
   await ws.connect();
