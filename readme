@@ -4,5 +4,7 @@ git clone https://github.com/mybox1407-art/mexc-triangular-arbitrage.git
 cd mexc-triangular-arbitrage
 docker compose up -d --build
 npm install
+npm install protobufjs
+npm install -D @types/protobufjs
 
 docker compose logs -f arbitrage-bot
