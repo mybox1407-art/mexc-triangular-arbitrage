@@ -19,6 +19,7 @@ type WsConnection = {
 const MAX_SUBSCRIPTIONS_PER_SOCKET = 30;
 const RECONNECT_DELAY_MS = 1_500;
 const PING_INTERVAL_MS = 20_000;
+const LIMIT_DEPTH_LEVELS = 5;
 
 export class MexcPublicWs {
   private readonly connections: WsConnection[] = [];
@@ -38,9 +39,7 @@ export class MexcPublicWs {
     this.stopped = false;
     this.decoder = await MexcProtoDecoder.create();
 
-    const groups = this.chunk(this.symbols, MAX_SUBSCRIPTIONS_PER_SOCKET);
-
-    for (const symbols of groups) {
+    for (const symbols of this.chunk(this.symbols, MAX_SUBSCRIPTIONS_PER_SOCKET)) {
       this.open(symbols);
     }
   }
@@ -69,11 +68,11 @@ export class MexcPublicWs {
     this.connections.push(connection);
 
     ws.on('open', () => {
-      this.subscribeDepth(connection);
+      this.subscribeLimitDepth(connection);
       this.startPing(connection);
 
       console.log(JSON.stringify({
-        msg: 'MEXC WebSocket connection opened',
+        msg: 'MEXC limit-depth WebSocket connection opened',
         symbols: symbols.length,
         sampleSymbols: symbols.slice(0, 5)
       }));
@@ -125,10 +124,10 @@ export class MexcPublicWs {
     });
   }
 
-  private subscribeDepth(connection: WsConnection): void {
+  private subscribeLimitDepth(connection: WsConnection): void {
     const params = connection.symbols.map(
       (symbol) =>
-        `spot@public.aggre.depth.v3.api.pb@100ms@${symbol.toUpperCase()}`
+        `spot@public.limit.depth.v3.api.pb@${symbol.toUpperCase()}@${LIMIT_DEPTH_LEVELS}`
     );
 
     this.send(connection.ws, {
@@ -137,7 +136,7 @@ export class MexcPublicWs {
     });
 
     console.log(JSON.stringify({
-      msg: 'MEXC protobuf depth subscriptions sent',
+      msg: 'MEXC protobuf limit-depth subscriptions sent',
       count: params.length,
       sampleTopics: params.slice(0, 5)
     }));
@@ -181,9 +180,9 @@ export class MexcPublicWs {
     const buffer = this.toBuffer(raw);
 
     try {
-      const depth = this.decoder.decodeAggreDepth(buffer);
+      const snapshot = this.decoder.decodeLimitDepth(buffer);
 
-      if (!depth) {
+      if (!snapshot) {
         return;
       }
 
@@ -191,27 +190,34 @@ export class MexcPublicWs {
 
       if (this.decodedDepthMessages % 100 === 0) {
         console.log(JSON.stringify({
-          msg: 'MEXC protobuf depth updates decoded',
+          msg: 'MEXC protobuf limit-depth snapshots decoded',
           receivedMessages: this.receivedMessages,
           decodedDepthMessages: this.decodedDepthMessages,
-          symbol: depth.symbol,
-          fromVersion: depth.fromVersion,
-          toVersion: depth.toVersion,
-          bids: depth.bids.length,
-          asks: depth.asks.length
+          symbol: snapshot.symbol,
+          version: snapshot.version,
+          bids: snapshot.bids.length,
+          asks: snapshot.asks.length
         }));
       }
 
-      void Promise.resolve(this.onDepth(depth)).catch((error) => {
+      void Promise.resolve(
+        this.onDepth({
+          symbol: snapshot.symbol,
+          fromVersion: snapshot.version,
+          toVersion: snapshot.version,
+          bids: snapshot.bids,
+          asks: snapshot.asks
+        })
+      ).catch((error) => {
         console.error(JSON.stringify({
-          msg: 'MEXC depth handler failed',
-          symbol: depth.symbol,
+          msg: 'MEXC limit-depth handler failed',
+          symbol: snapshot.symbol,
           error: error instanceof Error ? error.message : String(error)
         }));
       });
     } catch (error) {
       console.error(JSON.stringify({
-        msg: 'Cannot decode MEXC protobuf depth message',
+        msg: 'Cannot decode MEXC protobuf limit-depth message',
         error: error instanceof Error ? error.message : String(error),
         bytes: buffer.length,
         preview: buffer.subarray(0, 32).toString('hex')
