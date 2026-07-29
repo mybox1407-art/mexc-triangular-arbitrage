@@ -17,20 +17,26 @@ export type SymbolTradeFee = {
 };
 
 export class MexcAuthenticatedClient {
+  private readonly apiKey: string;
+  private readonly apiSecret: string;
+
   constructor(
-    private readonly apiKey = config.mexc.apiKey,
-    private readonly apiSecret = config.mexc.apiSecret
+    apiKey = config.mexc.apiKey,
+    apiSecret = config.mexc.apiSecret
   ) {
     if (!apiKey || !apiSecret) {
       throw new Error(
         'MEXC_API_KEY and MEXC_API_SECRET are required to load actual symbol fees'
       );
     }
+
+    this.apiKey = apiKey;
+    this.apiSecret = apiSecret;
   }
 
   async getTradeFee(symbol: string): Promise<SymbolTradeFee> {
     const params = new URLSearchParams({
-      symbol,
+      symbol: symbol.toUpperCase(),
       recvWindow: '5000',
       timestamp: String(Date.now())
     });
