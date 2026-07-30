@@ -18,50 +18,95 @@ export class ArbitrageCalculator {
     books: Map<string, OrderBook>,
     startAmount: number
   ): Opportunity | null {
-    let amount = startAmount;
-    const simulatedLegs: SimulatedLeg[] = [];
+    // 1. Прогоняем треугольник без комиссий, чтобы получить "идеальный" gross ROI.
+    let amountBeforeFees = startAmount;
 
     for (const leg of triangle.legs) {
       const book = books.get(leg.symbol);
-
       if (!book) {
         return null;
       }
 
       const snapshot = book.getSnapshot(100);
-
       if (!snapshot.ready) {
         return null;
       }
+
+      const exec = leg.side === 'BUY'
+        ? this.buyWithQuote(snapshot.asks, amountBeforeFees)
+        : this.sellBase(snapshot.bids, amountBeforeFees);
+
+      if (!exec) {
+        return null;
+      }
+
+      if (leg.side === 'BUY') {
+        amountBeforeFees = exec.baseAmount;
+      } else {
+        amountBeforeFees = exec.quoteReceived;
+      }
+    }
+
+    const finalAmountBeforeFees = amountBeforeFees;
+    const grossRoiBeforeFees =
+      (finalAmountBeforeFees - startAmount) / startAmount;
+
+    // 2. Прогоняем треугольник с комиссией takerFeeRate по каждой паре.
+    let amountAfterFees = startAmount;
+    const simulatedLegs: SimulatedLeg[] = [];
+
+    for (const leg of triangle.legs) {
+      const book = books.get(leg.symbol);
+      if (!book) {
+        return null;
+      }
+
+      const snapshot = book.getSnapshot(100);
+      if (!snapshot.ready) {
+        return null;
+      }
+
+      const feeRate = this.getTakerFeeRate(leg.symbol);
 
       const result = this.simulateLeg(
         leg,
         snapshot.bids,
         snapshot.asks,
-        amount,
-        this.getTakerFeeRate(leg.symbol)
+        amountAfterFees,
+        feeRate
       );
 
       if (!result) {
         return null;
       }
 
-      amount = result.outputAmount;
+      amountAfterFees = result.outputAmount;
       simulatedLegs.push(result);
     }
 
-    const finalAmount = amount;
-    const grossRoi = (finalAmount - startAmount) / startAmount;
-    const netRoi = grossRoi - config.trading.safetyBufferRate;
+    const finalAmountAfterFees = amountAfterFees;
+    const grossRoiAfterFees =
+      (finalAmountAfterFees - startAmount) / startAmount;
+
+    // 3. Safety buffer сверху.
+    const netRoi = grossRoiAfterFees - config.trading.safetyBufferRate;
+
+    // 4. Оценка общей комиссии относительно стартового ассета.
+    // Суммарная комиссия как доля от стартового ассета — это разница ROI до/после комиссий.
+    const totalFeeRateApprox = grossRoiBeforeFees - grossRoiAfterFees;
+    const totalFeeInStartAssetApprox = totalFeeRateApprox * startAmount;
 
     return {
       triangleId: triangle.id,
       startAsset: triangle.startAsset,
       startAmount,
-      finalAmount,
-      grossRoi,
+      finalAmount: finalAmountAfterFees,
+      grossRoiBeforeFees,
+      grossRoiAfterFees,
       netRoi,
-      expectedProfit: finalAmount - startAmount,
+      totalFeeInStartAsset: totalFeeInStartAssetApprox,
+      totalFeeRate: totalFeeRateApprox,
+      expectedProfit: finalAmountAfterFees - startAmount,
       legs: simulatedLegs as [SimulatedLeg, SimulatedLeg, SimulatedLeg],
       detectedAt: new Date()
     };
@@ -90,7 +135,6 @@ export class ArbitrageCalculator {
   ): SimulatedLeg | null {
     if (leg.side === 'BUY') {
       const execution = this.buyWithQuote(asks, inputAmount);
-
       if (!execution) {
         return null;
       }
@@ -116,7 +160,6 @@ export class ArbitrageCalculator {
     }
 
     const execution = this.sellBase(bids, inputAmount);
-
     if (!execution) {
       return null;
     }
