@@ -62,7 +62,11 @@ export class OpportunityService {
         this.diagnostics.best = opportunity;
       }
 
-      if (opportunity.netRoi < config.trading.minNetRoi) {
+      // Фильтр теперь по gross ROI после комиссий (до safety buffer).
+      if (
+        opportunity.grossRoiAfterFees <
+        config.trading.minGrossRoiAfterFees
+      ) {
         this.diagnostics.belowThreshold += 1;
         continue;
       }
@@ -114,6 +118,7 @@ export class OpportunityService {
       bestTotalFeeInStartAsset: best?.totalFeeInStartAsset ?? null,
       bestNetRoi: best?.netRoi ?? null,
       bestExpectedProfit: best?.expectedProfit ?? null,
+      minGrossRoiAfterFees: config.trading.minGrossRoiAfterFees,
       minNetRoi: config.trading.minNetRoi,
       takerFeeRate: config.trading.takerFeeRate,
       safetyBufferRate: config.trading.safetyBufferRate
