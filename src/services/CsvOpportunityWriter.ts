@@ -8,8 +8,11 @@ const HEADER = [
   'start_asset',
   'start_amount',
   'final_amount',
-  'gross_roi',
+  'gross_roi_before_fees',
+  'gross_roi_after_fees',
   'net_roi',
+  'total_fee_rate',
+  'total_fee_in_start_asset',
   'expected_profit',
   'leg_1',
   'leg_1_input',
@@ -40,7 +43,7 @@ function legName(leg: SimulatedLeg): string {
   return `${leg.fromAsset}->${leg.toAsset} (${leg.symbol}:${leg.side})`;
 }
 
-function legValues(leg: SimulatedLeg): string[] {
+function legValues(leg: SimulatedLeg): Array<string | number> {
   return [
     legName(leg),
     leg.inputAmount,
@@ -48,7 +51,7 @@ function legValues(leg: SimulatedLeg): string[] {
     leg.vwap,
     leg.feePaidInOutput,
     leg.levelsUsed
-  ].map(csvValue);
+  ];
 }
 
 export class CsvOpportunityWriter {
@@ -67,8 +70,11 @@ export class CsvOpportunityWriter {
         opportunity.startAsset,
         opportunity.startAmount,
         opportunity.finalAmount,
-        opportunity.grossRoi,
+        opportunity.grossRoiBeforeFees,
+        opportunity.grossRoiAfterFees,
         opportunity.netRoi,
+        opportunity.totalFeeRate,
+        opportunity.totalFeeInStartAsset,
         opportunity.expectedProfit,
         ...legValues(opportunity.legs[0]),
         ...legValues(opportunity.legs[1]),
