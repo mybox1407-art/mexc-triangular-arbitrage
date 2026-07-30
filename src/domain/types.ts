@@ -61,8 +61,22 @@ export interface Opportunity {
   startAsset: string;
   startAmount: number;
   finalAmount: number;
-  grossRoi: number;
+
+  // ROI до учёта комиссий (чистый VWAP, ideal).
+  grossRoiBeforeFees: number;
+
+  // ROI после комиссий, до safety buffer.
+  grossRoiAfterFees: number;
+
+  // ROI после комиссий + safety buffer.
   netRoi: number;
+
+  // Суммарная комиссия как доля от startAmount.
+  totalFeeRate: number;
+
+  // Суммарная комиссия в единицах стартового ассета (USDC).
+  totalFeeInStartAsset: number;
+
   expectedProfit: number;
   legs: [SimulatedLeg, SimulatedLeg, SimulatedLeg];
   detectedAt: Date;
