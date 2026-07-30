@@ -18,7 +18,7 @@ export class ArbitrageCalculator {
     books: Map<string, OrderBook>,
     startAmount: number
   ): Opportunity | null {
-    // 1. Прогоняем треугольник без комиссий, чтобы получить "идеальный" gross ROI.
+    // 1. Симуляция треугольника без комиссий — "идеальный" ROI.
     let amountBeforeFees = startAmount;
 
     for (const leg of triangle.legs) {
@@ -51,7 +51,7 @@ export class ArbitrageCalculator {
     const grossRoiBeforeFees =
       (finalAmountBeforeFees - startAmount) / startAmount;
 
-    // 2. Прогоняем треугольник с комиссией takerFeeRate по каждой паре.
+    // 2. Симуляция треугольника с комиссией takerFeeRate по каждой паре.
     let amountAfterFees = startAmount;
     const simulatedLegs: SimulatedLeg[] = [];
 
@@ -91,10 +91,9 @@ export class ArbitrageCalculator {
     // 3. Safety buffer сверху.
     const netRoi = grossRoiAfterFees - config.trading.safetyBufferRate;
 
-    // 4. Оценка общей комиссии относительно стартового ассета.
-    // Суммарная комиссия как доля от стартового ассета — это разница ROI до/после комиссий.
-    const totalFeeRateApprox = grossRoiBeforeFees - grossRoiAfterFees;
-    const totalFeeInStartAssetApprox = totalFeeRateApprox * startAmount;
+    // 4. Суммарная комиссия как доля от стартового ассета — разница ROI до/после фи.
+    const totalFeeRate = grossRoiBeforeFees - grossRoiAfterFees;
+    const totalFeeInStartAsset = totalFeeRate * startAmount;
 
     return {
       triangleId: triangle.id,
@@ -104,8 +103,8 @@ export class ArbitrageCalculator {
       grossRoiBeforeFees,
       grossRoiAfterFees,
       netRoi,
-      totalFeeInStartAsset: totalFeeInStartAssetApprox,
-      totalFeeRate: totalFeeRateApprox,
+      totalFeeRate,
+      totalFeeInStartAsset,
       expectedProfit: finalAmountAfterFees - startAmount,
       legs: simulatedLegs as [SimulatedLeg, SimulatedLeg, SimulatedLeg],
       detectedAt: new Date()
