@@ -80,4 +80,7 @@ export interface Opportunity {
   expectedProfit: number;
   legs: [SimulatedLeg, SimulatedLeg, SimulatedLeg];
   detectedAt: Date;
+
+  // Для совместимости с ArbitrageRepository (alias на grossRoiAfterFees).
+  grossRoi: number;
 }
