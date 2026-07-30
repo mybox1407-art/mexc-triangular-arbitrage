@@ -58,7 +58,6 @@ export const config = {
     '/app/data/paper-best-routes.csv'
   ),
 
-
   mexc: {
     restUrl: env('MEXC_REST_URL', 'https://api.mexc.com'),
     wsUrl: env('MEXC_WS_URL', 'wss://wbs-api.mexc.com/ws'),
@@ -79,8 +78,15 @@ export const config = {
       '10'
     ),
 
-    // Сигнал попадёт в onOpportunity при netRoi >= 0.03%.
+    // Порог по netRoi (если где-то ещё нужен).
     minNetRoi: rateEnv('MIN_NET_ROI', '0.0003'),
+
+    // Новый порог: gross ROI после комиссий (до safety buffer).
+    // По умолчанию 0.3% = 0.003.
+    minGrossRoiAfterFees: rateEnv(
+      'MIN_GROSS_ROI_AFTER_FEES',
+      '0.003'
+    ),
 
     // Standard MEXC spot taker fee: 0.05%.
     takerFeeRate: rateEnv('TAKER_FEE_RATE', '0.0005'),
