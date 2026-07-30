@@ -32,17 +32,17 @@ export class ArbitrageCalculator {
         return null;
       }
 
-      const exec = leg.side === 'BUY'
-        ? this.buyWithQuote(snapshot.asks, amountBeforeFees)
-        : this.sellBase(snapshot.bids, amountBeforeFees);
-
-      if (!exec) {
-        return null;
-      }
-
       if (leg.side === 'BUY') {
+        const exec = this.buyWithQuote(snapshot.asks, amountBeforeFees);
+        if (!exec) {
+          return null;
+        }
         amountBeforeFees = exec.baseAmount;
       } else {
+        const exec = this.sellBase(snapshot.bids, amountBeforeFees);
+        if (!exec) {
+          return null;
+        }
         amountBeforeFees = exec.quoteReceived;
       }
     }
@@ -107,7 +107,8 @@ export class ArbitrageCalculator {
       totalFeeInStartAsset,
       expectedProfit: finalAmountAfterFees - startAmount,
       legs: simulatedLegs as [SimulatedLeg, SimulatedLeg, SimulatedLeg],
-      detectedAt: new Date()
+      detectedAt: new Date(),
+      grossRoi: grossRoiAfterFees
     };
   }
 
