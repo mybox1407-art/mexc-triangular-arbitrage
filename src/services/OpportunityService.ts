@@ -67,7 +67,8 @@ export class OpportunityService {
         continue;
       }
 
-      const lastAt = this.lastReported.get(opportunity.triangleId) ?? 0;
+      const lastAt =
+        this.lastReported.get(opportunity.triangleId) ?? 0;
 
       if (Date.now() - lastAt < 1_000) {
         continue;
@@ -104,9 +105,13 @@ export class OpportunityService {
       opportunities,
       bestTriangle: best?.triangleId ?? null,
       bestStartAsset: best?.startAsset ?? null,
-      bestStartAmount: best?.startAmount ?? config.trading.startNotional,
+      bestStartAmount:
+        best?.startAmount ?? config.trading.startNotional,
       bestFinalAmount: best?.finalAmount ?? null,
-      bestGrossRoi: best?.grossRoi ?? null,
+      bestGrossRoiBeforeFees: best?.grossRoiBeforeFees ?? null,
+      bestGrossRoiAfterFees: best?.grossRoiAfterFees ?? null,
+      bestTotalFeeRate: best?.totalFeeRate ?? null,
+      bestTotalFeeInStartAsset: best?.totalFeeInStartAsset ?? null,
       bestNetRoi: best?.netRoi ?? null,
       bestExpectedProfit: best?.expectedProfit ?? null,
       minNetRoi: config.trading.minNetRoi,
@@ -116,7 +121,10 @@ export class OpportunityService {
 
     if (best) {
       void this.bestRouteWriter.write(best).catch((error) => {
-        console.error('Failed to write best paper route CSV', error);
+        console.error(
+          'Failed to write best paper route CSV',
+          error
+        );
       });
     }
 
