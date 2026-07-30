@@ -285,7 +285,9 @@ async function main(): Promise<void> {
           startAsset: opportunity.startAsset,
           start: opportunity.startAmount,
           final: opportunity.finalAmount,
-          grossRoiPct: Number((opportunity.grossRoi * 100).toFixed(4)),
+          grossRoiPct: Number(
+            (opportunity.grossRoiAfterFees * 100).toFixed(4)
+          ),
           netRoiPct: Number((opportunity.netRoi * 100).toFixed(4)),
           profit: opportunity.expectedProfit,
           legs: opportunity.legs.map((leg) => ({
