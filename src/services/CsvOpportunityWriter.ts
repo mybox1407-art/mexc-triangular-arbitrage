@@ -14,6 +14,7 @@ const HEADER = [
   'total_fee_rate',
   'total_fee_in_start_asset',
   'expected_profit',
+  'max_levels_used',  // ← ДОБАВЛЕНО
   'leg_1',
   'leg_1_input',
   'leg_1_output',
@@ -76,6 +77,7 @@ export class CsvOpportunityWriter {
         opportunity.totalFeeRate,
         opportunity.totalFeeInStartAsset,
         opportunity.expectedProfit,
+        Math.max(...opportunity.legs.map(leg => leg.levelsUsed)),  // ← ДОБАВЛЕНО
         ...legValues(opportunity.legs[0]),
         ...legValues(opportunity.legs[1]),
         ...legValues(opportunity.legs[2])
