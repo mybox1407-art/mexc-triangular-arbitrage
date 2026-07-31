@@ -8,3 +8,6 @@ docker compose up -d --build
 npm install
 
 docker compose logs -f arbitrage-bot
+
+
+ВАЖНО! После првоедения всех тестов перед продом нужно сделать автоматическое обновлений комиссий раз в 4 часа или в 6 часов
