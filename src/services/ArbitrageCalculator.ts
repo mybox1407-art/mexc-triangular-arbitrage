@@ -1,5 +1,3 @@
-src/services/ArbitrageCalculator.ts
-
 import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
 import type {
