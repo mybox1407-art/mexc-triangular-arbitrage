@@ -1,3 +1,5 @@
+src/services/ArbitrageCalculator.ts
+
 import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
 import type {
@@ -7,6 +9,9 @@ import type {
   Triangle,
   TriangleLeg
 } from '../domain/types.js';
+import pino from 'pino';
+
+const logger = pino({ level: config.logLevel });
 
 export class ArbitrageCalculator {
   constructor(
@@ -94,6 +99,24 @@ export class ArbitrageCalculator {
     // 4. Суммарная комиссия как доля от стартового ассета — разница ROI до/после фи.
     const totalFeeRate = grossRoiBeforeFees - grossRoiAfterFees;
     const totalFeeInStartAsset = totalFeeRate * startAmount;
+
+    // === ДОБАВЛЕНО: Метрики исполнения ===
+    const maxLevelsUsed = Math.max(...simulatedLegs.map(leg => leg.levelsUsed));
+    const levelsPerLeg = simulatedLegs.map(leg => leg.levelsUsed);
+
+    // === ДОБАВЛЕНО: Логирование метрик ===
+    logger.info(
+      {
+        triangleId: triangle.id,
+        maxLevelsUsed,
+        levelsPerLeg,
+        grossRoiBeforeFees,
+        grossRoiAfterFees,
+        netRoi,
+        totalFeeRate
+      },
+      'Simulated triangle'
+    );
 
     return {
       triangleId: triangle.id,
