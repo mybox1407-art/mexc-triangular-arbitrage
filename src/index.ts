@@ -13,6 +13,7 @@ import { OpportunityService } from './services/OpportunityService.js';
 import { TriangleBuilder } from './services/TriangleBuilder.js';
 
 const ALLOWED_ASSETS = new Set([
+  // === Твой текущий список (43) ===
   'USDC',
   'USDT',
   'BTC',
@@ -55,7 +56,29 @@ const ALLOWED_ASSETS = new Set([
   'FLOKI',
   'WIF',
   'BONK',
-  'PENGU'
+  'PENGU',
+
+  // === Добавь эти 20 (zero-fee + ликвидность) ===
+  'JUP',       // Solana DEX, ~$12M/24h
+  'KAS',       // Kaspa PoW, ~$11M/24h
+  'RUNE',      // THORChain, ~$10M/24h
+  'BOME',      // Мем, ~$9M/24h
+  'NOT',       // Notcoin, ~$8M/24h
+  'ORDI',      // Bitcoin NFT, ~$7M/24h
+  'PNUT',      // Peanut, ~$6M/24h
+  'POPCAT',    // Мем-кошка, ~$5M/24h
+  'MEW',       // Cat in dogs world, ~$4M/24h
+  'CHILLGUY',  // Viral мем, ~$3M/24h
+  'TAO',       // Bittensor, ~$15M/24h
+  'FET',       // AI-токен, ~$12M/24h
+  'GOAT',      // Мем, ~$10M/24h
+  'MYRO',      // Solana мем, ~$8M/24h
+  'NEIRO',     // Мем, ~$7M/24h
+  'THE',       // Thena, ~$6M/24h
+  'PONKE',     // Мем, ~$5M/24h
+  'TRUMP',     // Official Trump, ~$15M/24h
+  'MELANIA',   // Melania, ~$12M/24h
+  'PI'         // Pi Network, ~$10M/24h
 ]);
 
 const MAX_TRIANGLES = Number.POSITIVE_INFINITY;
