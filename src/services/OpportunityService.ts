@@ -1,10 +1,9 @@
-src/services/OpportunityService.ts
-
 import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
 import type { Opportunity, Triangle } from '../domain/types.js';
 import { ArbitrageCalculator } from './ArbitrageCalculator.js';
 import { CsvBestRouteWriter } from './CsvBestRouteWriter.js';
+import { PerformanceLogWriter } from './PerformanceLogWriter.js';  // ← ДОБАВИТЬ
 
 type Diagnostics = {
   evaluated: number;
@@ -37,6 +36,7 @@ export class OpportunityService {
     private readonly triangles: Triangle[],
     private readonly books: Map<string, OrderBook>,
     private readonly calculator: ArbitrageCalculator,
+    private readonly performanceLogWriter: PerformanceLogWriter,  // ← ДОБАВИТЬ
     private readonly onOpportunity: (opportunity: Opportunity) => Promise<void>
   ) {}
 
@@ -48,6 +48,8 @@ export class OpportunityService {
     for (const triangle of relevant) {
       this.diagnostics.evaluated += 1;
 
+      const evaluationStart = Date.now();  // ← ДОБАВИТЬ
+
       const opportunity = this.calculator.simulate(
         triangle,
         this.books,
@@ -55,6 +57,23 @@ export class OpportunityService {
       );
 
       if (!opportunity) {
+        this.diagnostics.unavailable += 1;
+        continue;
+      }
+
+      // === ДОБАВИТЬ: Возраст стаканов ===
+      const bookAges = triangle.legs.map(leg => {
+        const book = this.books.get(leg.symbol);
+        const snapshot = book.getSnapshot(5);
+        return {
+          symbol: leg.symbol,
+          ageMs: Date.now() - snapshot.updatedAt
+        };
+      });
+      const maxBookAge = Math.max(...bookAges.map(b => b.ageMs));
+
+      // === ДОБАВИТЬ: Проверка на stale ===
+      if (maxBookAge > STALE_BOOK_AFTER_MS) {
         this.diagnostics.unavailable += 1;
         continue;
       }
@@ -84,6 +103,14 @@ export class OpportunityService {
 
       this.lastReported.set(opportunity.triangleId, Date.now());
       this.diagnostics.opportunities += 1;
+
+      // === ДОБАВИТЬ: Логирование в performance файл ===
+      const evaluationTime = Date.now() - evaluationStart;
+      await this.performanceLogWriter.write(
+        opportunity,
+        evaluationTime,
+        bookAges
+      );
 
       await this.onOpportunity(opportunity);
     }
