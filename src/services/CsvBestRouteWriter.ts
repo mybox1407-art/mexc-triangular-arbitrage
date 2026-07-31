@@ -16,6 +16,7 @@ const HEADER = [
   'total_fee_rate',
   'total_fee_in_start_asset',
   'expected_profit',
+  'max_levels_used',  // ← ДОБАВЛЕНО
   'leg_1_route',
   'leg_1_symbol',
   'leg_1_side',
@@ -84,6 +85,7 @@ export class CsvBestRouteWriter {
         opportunity.totalFeeRate,
         opportunity.totalFeeInStartAsset,
         opportunity.expectedProfit,
+        Math.max(...opportunity.legs.map(leg => leg.levelsUsed)),  // ← ДОБАВЛЕНО
         ...legValues(opportunity.legs[0]),
         ...legValues(opportunity.legs[1]),
         ...legValues(opportunity.legs[2])
