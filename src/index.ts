@@ -10,6 +10,7 @@ import { ArbitrageRepository } from './repositories/ArbitrageRepository.js';
 import { ArbitrageCalculator } from './services/ArbitrageCalculator.js';
 import { CsvOpportunityWriter } from './services/CsvOpportunityWriter.js';
 import { OpportunityService } from './services/OpportunityService.js';
+import { PerformanceLogWriter } from './services/PerformanceLogWriter.js';  // ← ДОБАВИТЬ
 import { TriangleBuilder } from './services/TriangleBuilder.js';
 
 const ALLOWED_ASSETS = new Set([
@@ -94,6 +95,11 @@ const repository = new ArbitrageRepository(config.databaseUrl);
 
 const csvWriter = new CsvOpportunityWriter(
   config.csvOpportunitiesPath
+);
+
+// ← ДОБАВИТЬ: Performance log writer
+const performanceLogWriter = new PerformanceLogWriter(
+  config.performanceLogPath
 );
 
 const sleep = (ms: number): Promise<void> =>
@@ -299,6 +305,7 @@ async function main(): Promise<void> {
     readyTriangles,
     books,
     calculator,
+    performanceLogWriter,  // ← ДОБАВИТЬ: передан performanceLogWriter
     async (opportunity) => {
       await csvWriter.write(opportunity);
 
