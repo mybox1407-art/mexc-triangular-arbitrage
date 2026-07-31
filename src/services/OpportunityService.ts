@@ -1,3 +1,5 @@
+src/services/OpportunityService.ts
+
 import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
 import type { Opportunity, Triangle } from '../domain/types.js';
@@ -11,6 +13,8 @@ type Diagnostics = {
   opportunities: number;
   best: Opportunity | null;
 };
+
+const STALE_BOOK_AFTER_MS = 5_000;
 
 export class OpportunityService {
   private readonly lastReported = new Map<string, number>();
@@ -102,6 +106,17 @@ export class OpportunityService {
       best
     } = this.diagnostics;
 
+    // === ДОБАВЛЕНО: Диагностика возраста стаканов ===
+    const bookAges = [...this.books.values()].map(book => {
+      const snapshot = book.getSnapshot(5);
+      return {
+        symbol: snapshot.symbol,
+        ageMs: now - snapshot.updatedAt
+      };
+    });
+
+    const staleBooks = bookAges.filter(b => b.ageMs > STALE_BOOK_AFTER_MS);
+
     console.info('Paper arbitrage diagnostics', {
       evaluated,
       unavailable,
@@ -121,7 +136,9 @@ export class OpportunityService {
       minGrossRoiAfterFees: config.trading.minGrossRoiAfterFees,
       minNetRoi: config.trading.minNetRoi,
       takerFeeRate: config.trading.takerFeeRate,
-      safetyBufferRate: config.trading.safetyBufferRate
+      safetyBufferRate: config.trading.safetyBufferRate,
+      bookAges,              // ← ДОБАВЛЕНО
+      staleBooksCount: staleBooks.length  // ← ДОБАВЛЕНО
     });
 
     if (best) {
