@@ -61,7 +61,7 @@ export class OpportunityService {
         continue;
       }
 
-      // === Исправлено: Возраст стаканов с проверкой на undefined ===
+      // Возраст стаканов
       const bookAges = triangle.legs.map(leg => {
         const book = this.books.get(leg.symbol);
         if (!book) {
@@ -78,7 +78,7 @@ export class OpportunityService {
       });
       const maxBookAge = Math.max(...bookAges.map(b => b.ageMs));
 
-      // === Проверка на stale ===
+      // Проверка на stale
       if (maxBookAge > STALE_BOOK_AFTER_MS) {
         this.diagnostics.unavailable += 1;
         continue;
@@ -91,7 +91,7 @@ export class OpportunityService {
         this.diagnostics.best = opportunity;
       }
 
-      // Фильтр теперь по gross ROI после комиссий (до safety buffer).
+      // Фильтр по gross ROI после комиссий
       if (
         opportunity.grossRoiAfterFees <
         config.trading.minGrossRoiAfterFees
@@ -110,7 +110,7 @@ export class OpportunityService {
       this.lastReported.set(opportunity.triangleId, Date.now());
       this.diagnostics.opportunities += 1;
 
-      // === Логирование в performance файл ===
+      // Логирование в performance файл
       const evaluationTime = Date.now() - evaluationStart;
       await this.performanceLogWriter.write(
         opportunity,
@@ -139,7 +139,7 @@ export class OpportunityService {
       best
     } = this.diagnostics;
 
-    // === Диагностика возраста стаканов ===
+    // Диагностика возраста стаканов
     const bookAges = [...this.books.values()].map(book => {
       const snapshot = book.getSnapshot(5);
       return {
