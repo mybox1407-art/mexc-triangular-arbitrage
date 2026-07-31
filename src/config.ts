@@ -58,6 +58,12 @@ export const config = {
     '/app/data/paper-best-routes.csv'
   ),
 
+  // ← ДОБАВЛЕНО: Performance log path
+  performanceLogPath: env(
+    'PERFORMANCE_LOG_PATH',
+    '/app/logs/performance.log'
+  ),
+
   mexc: {
     restUrl: env('MEXC_REST_URL', 'https://api.mexc.com'),
     wsUrl: env('MEXC_WS_URL', 'wss://wbs-api.mexc.com/ws'),
