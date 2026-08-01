@@ -61,8 +61,7 @@ export class OpportunityService {
         continue;
       }
 
-      // Возраст стаканов
-      const bookAges = triangle.legs.map(leg => {
+      const bookAges = triangle.legs.map((leg) => {
         const book = this.books.get(leg.symbol);
         if (!book) {
           return {
@@ -70,15 +69,16 @@ export class OpportunityService {
             ageMs: 0
           };
         }
+
         const snapshot = book.getSnapshot(5);
         return {
           symbol: leg.symbol,
           ageMs: Date.now() - snapshot.updatedAt
         };
       });
-      const maxBookAge = Math.max(...bookAges.map(b => b.ageMs));
 
-      // Проверка на stale
+      const maxBookAge = Math.max(...bookAges.map((b) => b.ageMs));
+
       if (maxBookAge > STALE_BOOK_AFTER_MS) {
         this.diagnostics.unavailable += 1;
         continue;
@@ -91,7 +91,6 @@ export class OpportunityService {
         this.diagnostics.best = opportunity;
       }
 
-      // Фильтр по gross ROI после комиссий
       if (
         opportunity.grossRoiAfterFees <
         config.trading.minGrossRoiAfterFees
@@ -100,8 +99,7 @@ export class OpportunityService {
         continue;
       }
 
-      const lastAt =
-        this.lastReported.get(opportunity.triangleId) ?? 0;
+      const lastAt = this.lastReported.get(opportunity.triangleId) ?? 0;
 
       if (Date.now() - lastAt < 1_000) {
         continue;
@@ -110,13 +108,13 @@ export class OpportunityService {
       this.lastReported.set(opportunity.triangleId, Date.now());
       this.diagnostics.opportunities += 1;
 
-      // Логирование в performance файл
       const evaluationTime = Date.now() - evaluationStart;
-      await this.performanceLogWriter.write(
-        opportunity,
-        evaluationTime,
-        bookAges
-      );
+
+      void this.performanceLogWriter
+        .write(opportunity, evaluationTime, bookAges)
+        .catch((error) => {
+          console.error('Failed to write performance log', error);
+        });
 
       await this.onOpportunity(opportunity);
     }
@@ -139,8 +137,7 @@ export class OpportunityService {
       best
     } = this.diagnostics;
 
-    // Диагностика возраста стаканов
-    const bookAges = [...this.books.values()].map(book => {
+    const bookAges = [...this.books.values()].map((book) => {
       const snapshot = book.getSnapshot(5);
       return {
         symbol: snapshot.symbol,
@@ -148,7 +145,9 @@ export class OpportunityService {
       };
     });
 
-    const staleBooks = bookAges.filter(b => b.ageMs > STALE_BOOK_AFTER_MS);
+    const staleBooks = bookAges.filter(
+      (b) => b.ageMs > STALE_BOOK_AFTER_MS
+    );
 
     console.info('Paper arbitrage diagnostics', {
       evaluated,
