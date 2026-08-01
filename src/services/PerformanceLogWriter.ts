@@ -16,29 +16,50 @@ export class PerformanceLogWriter {
     evaluationTime: number,
     bookAges: Array<{ symbol: string; ageMs: number }>
   ): Promise<void> {
-    this.writeQueue = this.writeQueue.then(async () => {
-      await this.ensureFile();
+    this.writeQueue = this.writeQueue
+      .catch((err) => {
+        logger.error(
+          { err, filePath: this.filePath },
+          'Previous performance log write failed'
+        );
+      })
+      .then(async () => {
+        await this.ensureFile();
 
-      const maxBookAge = Math.max(...bookAges.map(b => b.ageMs));
-      const maxLevelsUsed = Math.max(...opportunity.legs.map(leg => leg.levelsUsed));
+        const maxBookAge = bookAges.length
+          ? Math.max(...bookAges.map((b) => b.ageMs))
+          : 0;
 
-      const logEntry = {
-        timestamp: Date.now(),
-        detectedAt: opportunity.detectedAt.toISOString(),
-        triangleId: opportunity.triangleId,
-        evaluationTime,
-        maxBookAge,
-        bookAges,
-        maxLevelsUsed,
-        levelsPerLeg: opportunity.legs.map(leg => leg.levelsUsed),
-        grossRoiAfterFees: opportunity.grossRoiAfterFees,
-        netRoi: opportunity.netRoi,
-        expectedProfit: opportunity.expectedProfit
-      };
+        const maxLevelsUsed = opportunity.legs.length
+          ? Math.max(...opportunity.legs.map((leg) => leg.levelsUsed))
+          : 0;
 
-      // Пишем в файл в JSON Lines формате
-      await appendFile(this.filePath, JSON.stringify(logEntry) + '\n', 'utf8');
-    });
+        const logEntry = {
+          timestamp: Date.now(),
+          detectedAt: opportunity.detectedAt.toISOString(),
+          triangleId: opportunity.triangleId,
+          evaluationTime,
+          maxBookAge,
+          bookAges,
+          maxLevelsUsed,
+          levelsPerLeg: opportunity.legs.map((leg) => leg.levelsUsed),
+          grossRoiAfterFees: opportunity.grossRoiAfterFees,
+          netRoi: opportunity.netRoi,
+          expectedProfit: opportunity.expectedProfit
+        };
+
+        await appendFile(
+          this.filePath,
+          JSON.stringify(logEntry) + '\n',
+          'utf8'
+        );
+      })
+      .catch((err) => {
+        logger.error(
+          { err, filePath: this.filePath },
+          'Performance log write failed'
+        );
+      });
 
     return this.writeQueue;
   }
@@ -51,7 +72,6 @@ export class PerformanceLogWriter {
     try {
       await stat(this.filePath);
     } catch {
-      // Файл не существует — создаём пустым
       await appendFile(this.filePath, '', 'utf8');
     }
 
