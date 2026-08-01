@@ -10,11 +10,11 @@ import { ArbitrageRepository } from './repositories/ArbitrageRepository.js';
 import { ArbitrageCalculator } from './services/ArbitrageCalculator.js';
 import { CsvOpportunityWriter } from './services/CsvOpportunityWriter.js';
 import { OpportunityService } from './services/OpportunityService.js';
-import { PerformanceLogWriter } from './services/PerformanceLogWriter.js';  // ← ДОБАВИТЬ
+import { PerformanceLogWriter } from './services/PerformanceLogWriter.js';
+import { TelegramNotifier } from './services/TelegramNotifier.js';
 import { TriangleBuilder } from './services/TriangleBuilder.js';
 
 const ALLOWED_ASSETS = new Set([
-  // === Твой текущий список (43) ===
   'USDC',
   'USDT',
   'BTC',
@@ -58,28 +58,26 @@ const ALLOWED_ASSETS = new Set([
   'WIF',
   'BONK',
   'PENGU',
-
-  // === Добавь эти 20 (zero-fee + ликвидность) ===
-  'JUP',       // Solana DEX, ~$12M/24h
-  'KAS',       // Kaspa PoW, ~$11M/24h
-  'RUNE',      // THORChain, ~$10M/24h
-  'BOME',      // Мем, ~$9M/24h
-  'NOT',       // Notcoin, ~$8M/24h
-  'ORDI',      // Bitcoin NFT, ~$7M/24h
-  'PNUT',      // Peanut, ~$6M/24h
-  'POPCAT',    // Мем-кошка, ~$5M/24h
-  'MEW',       // Cat in dogs world, ~$4M/24h
-  'CHILLGUY',  // Viral мем, ~$3M/24h
-  'TAO',       // Bittensor, ~$15M/24h
-  'FET',       // AI-токен, ~$12M/24h
-  'GOAT',      // Мем, ~$10M/24h
-  'MYRO',      // Solana мем, ~$8M/24h
-  'NEIRO',     // Мем, ~$7M/24h
-  'THE',       // Thena, ~$6M/24h
-  'PONKE',     // Мем, ~$5M/24h
-  'TRUMP',     // Official Trump, ~$15M/24h
-  'MELANIA',   // Melania, ~$12M/24h
-  'PI'         // Pi Network, ~$10M/24h
+  'JUP',
+  'KAS',
+  'RUNE',
+  'BOME',
+  'NOT',
+  'ORDI',
+  'PNUT',
+  'POPCAT',
+  'MEW',
+  'CHILLGUY',
+  'TAO',
+  'FET',
+  'GOAT',
+  'MYRO',
+  'NEIRO',
+  'THE',
+  'PONKE',
+  'TRUMP',
+  'MELANIA',
+  'PI'
 ]);
 
 const MAX_TRIANGLES = Number.POSITIVE_INFINITY;
@@ -97,10 +95,11 @@ const csvWriter = new CsvOpportunityWriter(
   config.csvOpportunitiesPath
 );
 
-// ← ДОБАВИТЬ: Performance log writer
 const performanceLogWriter = new PerformanceLogWriter(
   config.performanceLogPath
 );
+
+const telegramNotifier = new TelegramNotifier();
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -131,6 +130,8 @@ async function main(): Promise<void> {
     },
     'Starting USDC low-fee triangular arbitrage scanner'
   );
+
+  void telegramNotifier.send('✅ Arbitrage scanner started').catch(() => undefined);
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
 
@@ -305,7 +306,7 @@ async function main(): Promise<void> {
     readyTriangles,
     books,
     calculator,
-    performanceLogWriter,  // ← ДОБАВИТЬ: передан performanceLogWriter
+    performanceLogWriter,
     async (opportunity) => {
       await csvWriter.write(opportunity);
 
@@ -335,6 +336,12 @@ async function main(): Promise<void> {
       );
 
       await repository.saveOpportunity(opportunity);
+
+      void telegramNotifier
+        .sendOpportunity(opportunity)
+        .catch((error) => {
+          logger.error({ err: error }, 'Telegram notify failed');
+        });
     }
   );
 
@@ -403,6 +410,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     logger.info('Shutdown started');
+    void telegramNotifier.send('🛑 Arbitrage scanner stopped').catch(() => undefined);
     ws.stop();
     await repository.close();
     process.exit(0);
