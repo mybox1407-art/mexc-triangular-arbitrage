@@ -6,7 +6,6 @@ import { MexcAuthenticatedClient } from './mexc/MexcAuthenticatedClient.js';
 import { MexcPublicWs } from './mexc/MexcPublicWs.js';
 import { MexcRestClient } from './mexc/MexcRestClient.js';
 import { MexcTradeFeeLoader } from './mexc/MexcTradeFeeLoader.js';
-import { ArbitrageRepository } from './repositories/ArbitrageRepository.js';
 import { ArbitrageCalculator } from './services/ArbitrageCalculator.js';
 import { CsvOpportunityWriter } from './services/CsvOpportunityWriter.js';
 import { OpportunityService } from './services/OpportunityService.js';
@@ -89,7 +88,6 @@ const ZERO_FEE_EPSILON = 1e-12;
 
 const logger = pino({ level: config.logLevel });
 const rest = new MexcRestClient();
-const repository = new ArbitrageRepository(config.databaseUrl);
 
 const csvWriter = new CsvOpportunityWriter(
   config.csvOpportunitiesPath
@@ -133,7 +131,9 @@ async function main(): Promise<void> {
 
   void telegramNotifier
     .send('✅ Arbitrage scanner started')
-    .catch(() => undefined);
+    .catch((error) => {
+      logger.warn({ err: error }, 'Failed to send startup Telegram message');
+    });
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
 
@@ -310,89 +310,45 @@ async function main(): Promise<void> {
     calculator,
     performanceLogWriter,
     async (opportunity) => {
+      await csvWriter.write(opportunity);
+
+      logger.info(
+        {
+          triangle: opportunity.triangleId,
+          startAsset: opportunity.startAsset,
+          start: opportunity.startAmount,
+          final: opportunity.finalAmount,
+          grossRoiPct: Number(
+            (opportunity.grossRoiAfterFees * 100).toFixed(4)
+          ),
+          netRoiPct: Number((opportunity.netRoi * 100).toFixed(4)),
+          profit: opportunity.expectedProfit,
+          legs: opportunity.legs.map((leg) => ({
+            symbol: leg.symbol,
+            side: leg.side,
+            route: `${leg.fromAsset}->${leg.toAsset}`,
+            input: leg.inputAmount,
+            output: leg.outputAmount,
+            vwap: leg.vwap,
+            fee: leg.feePaidInOutput,
+            levelsUsed: leg.levelsUsed
+          }))
+        },
+        'USDC low-fee paper arbitrage opportunity'
+      );
+
+      logger.info(
+        {
+          triangle: opportunity.triangleId,
+          grossRoiAfterFees: opportunity.grossRoiAfterFees,
+          netRoi: opportunity.netRoi,
+          profit: opportunity.expectedProfit
+        },
+        'Sending Telegram opportunity notification'
+      );
+
       try {
-        console.error(
-          '[TRACE 1] callback entered',
-          JSON.stringify({
-            triangle: opportunity.triangleId
-          })
-        );
-
-        await csvWriter.write(opportunity);
-
-        console.error(
-          '[TRACE 2] csv written',
-          JSON.stringify({
-            triangle: opportunity.triangleId
-          })
-        );
-
-        logger.info(
-          {
-            triangle: opportunity.triangleId,
-            startAsset: opportunity.startAsset,
-            start: opportunity.startAmount,
-            final: opportunity.finalAmount,
-            grossRoiPct: Number(
-              (opportunity.grossRoiAfterFees * 100).toFixed(4)
-            ),
-            netRoiPct: Number((opportunity.netRoi * 100).toFixed(4)),
-            profit: opportunity.expectedProfit,
-            legs: opportunity.legs.map((leg) => ({
-              symbol: leg.symbol,
-              side: leg.side,
-              route: `${leg.fromAsset}->${leg.toAsset}`,
-              input: leg.inputAmount,
-              output: leg.outputAmount,
-              vwap: leg.vwap,
-              fee: leg.feePaidInOutput,
-              levelsUsed: leg.levelsUsed
-            }))
-          },
-          'USDC low-fee paper arbitrage opportunity'
-        );
-
-        console.error(
-          '[TRACE 3] opportunity logged',
-          JSON.stringify({
-            triangle: opportunity.triangleId
-          })
-        );
-
-        await repository.saveOpportunity(opportunity);
-
-        console.error(
-          '[TRACE 4] repository saved',
-          JSON.stringify({
-            triangle: opportunity.triangleId
-          })
-        );
-
-        logger.info(
-          {
-            triangle: opportunity.triangleId,
-            grossRoiAfterFees: opportunity.grossRoiAfterFees,
-            netRoi: opportunity.netRoi,
-            profit: opportunity.expectedProfit
-          },
-          'Sending Telegram opportunity notification'
-        );
-
-        console.error(
-          '[TRACE 5] before telegram send',
-          JSON.stringify({
-            triangle: opportunity.triangleId
-          })
-        );
-
         await telegramNotifier.sendOpportunity(opportunity);
-
-        console.error(
-          '[TRACE 6] telegram sent',
-          JSON.stringify({
-            triangle: opportunity.triangleId
-          })
-        );
 
         logger.info(
           {
@@ -401,29 +357,13 @@ async function main(): Promise<void> {
           'Telegram opportunity notification sent'
         );
       } catch (error) {
-        console.error(
-          '[TRACE FAIL]',
-          JSON.stringify({
-            triangle: opportunity.triangleId,
-            error:
-              error instanceof Error
-                ? {
-                    message: error.message,
-                    stack: error.stack
-                  }
-                : String(error)
-          })
-        );
-
         logger.error(
           {
             err: error,
             triangle: opportunity.triangleId
           },
-          'Opportunity callback failed'
+          'Telegram notify failed'
         );
-
-        throw error;
       }
     }
   );
@@ -493,11 +433,14 @@ async function main(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     logger.info('Shutdown started');
+
     void telegramNotifier
       .send('🛑 Arbitrage scanner stopped')
-      .catch(() => undefined);
+      .catch((error) => {
+        logger.warn({ err: error }, 'Failed to send shutdown Telegram message');
+      });
+
     ws.stop();
-    await repository.close();
     process.exit(0);
   };
 
@@ -507,6 +450,5 @@ async function main(): Promise<void> {
 
 main().catch(async (error) => {
   logger.fatal({ err: error }, 'Application failed to start');
-  await repository.close();
   process.exit(1);
 });
