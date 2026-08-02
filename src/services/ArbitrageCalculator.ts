@@ -11,6 +11,14 @@ import pino from 'pino';
 
 const logger = pino({ level: config.logLevel });
 
+type BookSnapshotLike = {
+  symbol: string;
+  bids: BookLevel[];
+  asks: BookLevel[];
+  ready: boolean;
+  updatedAt: number;
+};
+
 export class ArbitrageCalculator {
   constructor(
     private readonly takerFeesBySymbol = new Map<string, number>()
@@ -21,8 +29,7 @@ export class ArbitrageCalculator {
     books: Map<string, OrderBook>,
     startAmount: number
   ): Opportunity | null {
-    // 1. Симуляция треугольника без комиссий — "идеальный" ROI.
-    let amountBeforeFees = startAmount;
+    const snapshots = new Map<string, BookSnapshotLike>();
 
     for (const leg of triangle.legs) {
       const book = books.get(leg.symbol);
@@ -31,7 +38,32 @@ export class ArbitrageCalculator {
       }
 
       const snapshot = book.getSnapshot(100);
-      if (!snapshot.ready) {
+      snapshots.set(leg.symbol, {
+        symbol: snapshot.symbol,
+        bids: snapshot.bids,
+        asks: snapshot.asks,
+        ready: snapshot.ready,
+        updatedAt: snapshot.updatedAt
+      });
+    }
+
+    return this.simulateFromSnapshots(
+      triangle,
+      snapshots,
+      startAmount
+    );
+  }
+
+  simulateFromSnapshots(
+    triangle: Triangle,
+    snapshots: Map<string, BookSnapshotLike>,
+    startAmount: number
+  ): Opportunity | null {
+    let amountBeforeFees = startAmount;
+
+    for (const leg of triangle.legs) {
+      const snapshot = snapshots.get(leg.symbol);
+      if (!snapshot || !snapshot.ready) {
         return null;
       }
 
@@ -54,18 +86,12 @@ export class ArbitrageCalculator {
     const grossRoiBeforeFees =
       (finalAmountBeforeFees - startAmount) / startAmount;
 
-    // 2. Симуляция треугольника с комиссией takerFeeRate по каждой паре.
     let amountAfterFees = startAmount;
     const simulatedLegs: SimulatedLeg[] = [];
 
     for (const leg of triangle.legs) {
-      const book = books.get(leg.symbol);
-      if (!book) {
-        return null;
-      }
-
-      const snapshot = book.getSnapshot(100);
-      if (!snapshot.ready) {
+      const snapshot = snapshots.get(leg.symbol);
+      if (!snapshot || !snapshot.ready) {
         return null;
       }
 
@@ -87,22 +113,25 @@ export class ArbitrageCalculator {
       simulatedLegs.push(result);
     }
 
+    if (simulatedLegs.length !== 3) {
+      return null;
+    }
+
     const finalAmountAfterFees = amountAfterFees;
     const grossRoiAfterFees =
       (finalAmountAfterFees - startAmount) / startAmount;
 
-    // 3. Safety buffer сверху.
-    const netRoi = grossRoiAfterFees - config.trading.safetyBufferRate;
+    const netRoi =
+      grossRoiAfterFees - config.trading.safetyBufferRate;
 
-    // 4. Суммарная комиссия как доля от стартового ассета — разница ROI до/после фи.
     const totalFeeRate = grossRoiBeforeFees - grossRoiAfterFees;
     const totalFeeInStartAsset = totalFeeRate * startAmount;
 
-    // === ДОБАВЛЕНО: Метрики исполнения ===
-    const maxLevelsUsed = Math.max(...simulatedLegs.map(leg => leg.levelsUsed));
-    const levelsPerLeg = simulatedLegs.map(leg => leg.levelsUsed);
+    const maxLevelsUsed = Math.max(
+      ...simulatedLegs.map((leg) => leg.levelsUsed)
+    );
+    const levelsPerLeg = simulatedLegs.map((leg) => leg.levelsUsed);
 
-    // === ДОБАВЛЕНО: Логирование метрик ===
     logger.info(
       {
         triangleId: triangle.id,
