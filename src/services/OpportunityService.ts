@@ -13,10 +13,17 @@ type Diagnostics = {
   best: Opportunity | null;
 };
 
+type BookAge = {
+  symbol: string;
+  ageMs: number;
+};
+
 const STALE_BOOK_AFTER_MS = 5_000;
+const REPORT_THROTTLE_MS = 1_000;
 
 export class OpportunityService {
   private readonly lastReported = new Map<string, number>();
+  private readonly inFlightTriangles = new Set<string>();
 
   private readonly bestRouteWriter = new CsvBestRouteWriter(
     config.csvBestRoutesPath
@@ -48,7 +55,19 @@ export class OpportunityService {
     for (const triangle of relevant) {
       this.diagnostics.evaluated += 1;
 
-      const evaluationStart = Date.now();
+      const evaluationStartedAt = Date.now();
+
+      const bookState = this.collectBookState(triangle, evaluationStartedAt);
+
+      if (!bookState) {
+        this.diagnostics.unavailable += 1;
+        continue;
+      }
+
+      if (bookState.maxBookAge > STALE_BOOK_AFTER_MS) {
+        this.diagnostics.unavailable += 1;
+        continue;
+      }
 
       const opportunity = this.calculator.simulate(
         triangle,
@@ -57,29 +76,6 @@ export class OpportunityService {
       );
 
       if (!opportunity) {
-        this.diagnostics.unavailable += 1;
-        continue;
-      }
-
-      const bookAges = triangle.legs.map((leg) => {
-        const book = this.books.get(leg.symbol);
-        if (!book) {
-          return {
-            symbol: leg.symbol,
-            ageMs: 0
-          };
-        }
-
-        const snapshot = book.getSnapshot(5);
-        return {
-          symbol: leg.symbol,
-          ageMs: Date.now() - snapshot.updatedAt
-        };
-      });
-
-      const maxBookAge = Math.max(...bookAges.map((b) => b.ageMs));
-
-      if (maxBookAge > STALE_BOOK_AFTER_MS) {
         this.diagnostics.unavailable += 1;
         continue;
       }
@@ -99,27 +95,68 @@ export class OpportunityService {
         continue;
       }
 
+      const decisionNow = Date.now();
       const lastAt = this.lastReported.get(opportunity.triangleId) ?? 0;
 
-      if (Date.now() - lastAt < 1_000) {
+      if (decisionNow - lastAt < REPORT_THROTTLE_MS) {
         continue;
       }
 
-      this.lastReported.set(opportunity.triangleId, Date.now());
+      if (this.inFlightTriangles.has(opportunity.triangleId)) {
+        continue;
+      }
+
+      this.lastReported.set(opportunity.triangleId, decisionNow);
+      this.inFlightTriangles.add(opportunity.triangleId);
       this.diagnostics.opportunities += 1;
 
-      const evaluationTime = Date.now() - evaluationStart;
+      const evaluationTime = decisionNow - evaluationStartedAt;
 
       void this.performanceLogWriter
-        .write(opportunity, evaluationTime, bookAges)
+        .write(opportunity, evaluationTime, bookState.bookAges)
         .catch((error) => {
           console.error('Failed to write performance log', error);
         });
 
-      await this.onOpportunity(opportunity);
+      try {
+        await this.onOpportunity(opportunity);
+      } finally {
+        this.inFlightTriangles.delete(opportunity.triangleId);
+      }
     }
 
     this.logDiagnosticsIfNeeded();
+  }
+
+  private collectBookState(
+    triangle: Triangle,
+    now: number
+  ): { bookAges: BookAge[]; maxBookAge: number } | null {
+    const bookAges: BookAge[] = [];
+
+    for (const leg of triangle.legs) {
+      const book = this.books.get(leg.symbol);
+
+      if (!book) {
+        return null;
+      }
+
+      const snapshot = book.getSnapshot(5);
+
+      bookAges.push({
+        symbol: leg.symbol,
+        ageMs: now - snapshot.updatedAt
+      });
+    }
+
+    const maxBookAge = bookAges.length
+      ? Math.max(...bookAges.map((b) => b.ageMs))
+      : 0;
+
+    return {
+      bookAges,
+      maxBookAge
+    };
   }
 
   private logDiagnosticsIfNeeded(): void {
