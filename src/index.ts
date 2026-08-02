@@ -131,7 +131,9 @@ async function main(): Promise<void> {
     'Starting USDC low-fee triangular arbitrage scanner'
   );
 
-  void telegramNotifier.send('✅ Arbitrage scanner started').catch(() => undefined);
+  void telegramNotifier
+    .send('✅ Arbitrage scanner started')
+    .catch(() => undefined);
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
 
@@ -308,48 +310,90 @@ async function main(): Promise<void> {
     calculator,
     performanceLogWriter,
     async (opportunity) => {
-      await csvWriter.write(opportunity);
-
-      logger.info(
-        {
-          triangle: opportunity.triangleId,
-          startAsset: opportunity.startAsset,
-          start: opportunity.startAmount,
-          final: opportunity.finalAmount,
-          grossRoiPct: Number(
-            (opportunity.grossRoiAfterFees * 100).toFixed(4)
-          ),
-          netRoiPct: Number((opportunity.netRoi * 100).toFixed(4)),
-          profit: opportunity.expectedProfit,
-          legs: opportunity.legs.map((leg) => ({
-            symbol: leg.symbol,
-            side: leg.side,
-            route: `${leg.fromAsset}->${leg.toAsset}`,
-            input: leg.inputAmount,
-            output: leg.outputAmount,
-            vwap: leg.vwap,
-            fee: leg.feePaidInOutput,
-            levelsUsed: leg.levelsUsed
-          }))
-        },
-        'USDC low-fee paper arbitrage opportunity'
-      );
-
-      await repository.saveOpportunity(opportunity);
-
-      logger.info(
-        {
-          triangle: opportunity.triangleId,
-          grossRoiAfterFees: opportunity.grossRoiAfterFees,
-          netRoi: opportunity.netRoi,
-          profit: opportunity.expectedProfit
-        },
-        'Sending Telegram opportunity notification'
-      );
-      
       try {
+        console.error(
+          '[TRACE 1] callback entered',
+          JSON.stringify({
+            triangle: opportunity.triangleId
+          })
+        );
+
+        await csvWriter.write(opportunity);
+
+        console.error(
+          '[TRACE 2] csv written',
+          JSON.stringify({
+            triangle: opportunity.triangleId
+          })
+        );
+
+        logger.info(
+          {
+            triangle: opportunity.triangleId,
+            startAsset: opportunity.startAsset,
+            start: opportunity.startAmount,
+            final: opportunity.finalAmount,
+            grossRoiPct: Number(
+              (opportunity.grossRoiAfterFees * 100).toFixed(4)
+            ),
+            netRoiPct: Number((opportunity.netRoi * 100).toFixed(4)),
+            profit: opportunity.expectedProfit,
+            legs: opportunity.legs.map((leg) => ({
+              symbol: leg.symbol,
+              side: leg.side,
+              route: `${leg.fromAsset}->${leg.toAsset}`,
+              input: leg.inputAmount,
+              output: leg.outputAmount,
+              vwap: leg.vwap,
+              fee: leg.feePaidInOutput,
+              levelsUsed: leg.levelsUsed
+            }))
+          },
+          'USDC low-fee paper arbitrage opportunity'
+        );
+
+        console.error(
+          '[TRACE 3] opportunity logged',
+          JSON.stringify({
+            triangle: opportunity.triangleId
+          })
+        );
+
+        await repository.saveOpportunity(opportunity);
+
+        console.error(
+          '[TRACE 4] repository saved',
+          JSON.stringify({
+            triangle: opportunity.triangleId
+          })
+        );
+
+        logger.info(
+          {
+            triangle: opportunity.triangleId,
+            grossRoiAfterFees: opportunity.grossRoiAfterFees,
+            netRoi: opportunity.netRoi,
+            profit: opportunity.expectedProfit
+          },
+          'Sending Telegram opportunity notification'
+        );
+
+        console.error(
+          '[TRACE 5] before telegram send',
+          JSON.stringify({
+            triangle: opportunity.triangleId
+          })
+        );
+
         await telegramNotifier.sendOpportunity(opportunity);
-      
+
+        console.error(
+          '[TRACE 6] telegram sent',
+          JSON.stringify({
+            triangle: opportunity.triangleId
+          })
+        );
+
         logger.info(
           {
             triangle: opportunity.triangleId
@@ -357,13 +401,29 @@ async function main(): Promise<void> {
           'Telegram opportunity notification sent'
         );
       } catch (error) {
+        console.error(
+          '[TRACE FAIL]',
+          JSON.stringify({
+            triangle: opportunity.triangleId,
+            error:
+              error instanceof Error
+                ? {
+                    message: error.message,
+                    stack: error.stack
+                  }
+                : String(error)
+          })
+        );
+
         logger.error(
           {
             err: error,
             triangle: opportunity.triangleId
           },
-          'Telegram notify failed'
+          'Opportunity callback failed'
         );
+
+        throw error;
       }
     }
   );
@@ -433,7 +493,9 @@ async function main(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     logger.info('Shutdown started');
-    void telegramNotifier.send('🛑 Arbitrage scanner stopped').catch(() => undefined);
+    void telegramNotifier
+      .send('🛑 Arbitrage scanner stopped')
+      .catch(() => undefined);
     ws.stop();
     await repository.close();
     process.exit(0);
