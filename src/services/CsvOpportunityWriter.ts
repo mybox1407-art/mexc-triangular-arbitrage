@@ -14,7 +14,7 @@ const HEADER = [
   'total_fee_rate',
   'total_fee_in_start_asset',
   'expected_profit',
-  'max_levels_used',  // ← ДОБАВЛЕНО
+  'max_levels_used',
   'leg_1',
   'leg_1_input',
   'leg_1_output',
@@ -65,6 +65,17 @@ export class CsvOpportunityWriter {
     this.writeQueue = this.writeQueue.then(async () => {
       await this.ensureFile();
 
+      if (opportunity.legs.length !== 3) {
+        throw new Error(
+          `Expected 3 legs, got ${opportunity.legs.length} for ${opportunity.triangleId}`
+        );
+      }
+
+      const [leg1, leg2, leg3] = opportunity.legs;
+      const maxLevelsUsed = Math.max(
+        ...opportunity.legs.map((leg) => leg.levelsUsed)
+      );
+
       const row = [
         opportunity.detectedAt.toISOString(),
         opportunity.triangleId,
@@ -77,10 +88,10 @@ export class CsvOpportunityWriter {
         opportunity.totalFeeRate,
         opportunity.totalFeeInStartAsset,
         opportunity.expectedProfit,
-        Math.max(...opportunity.legs.map(leg => leg.levelsUsed)),  // ← ДОБАВЛЕНО
-        ...legValues(opportunity.legs[0]),
-        ...legValues(opportunity.legs[1]),
-        ...legValues(opportunity.legs[2])
+        maxLevelsUsed,
+        ...legValues(leg1),
+        ...legValues(leg2),
+        ...legValues(leg3)
       ]
         .map(csvValue)
         .join(',');
