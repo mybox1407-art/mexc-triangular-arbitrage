@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
-import type { Opportunity, Triangle } from '../domain/types.js';
+import type { BookLevel, Opportunity, Triangle } from '../domain/types.js';
 import { ArbitrageCalculator } from './ArbitrageCalculator.js';
 import { CsvBestRouteWriter } from './CsvBestRouteWriter.js';
 import { PerformanceLogWriter } from './PerformanceLogWriter.js';
@@ -16,6 +16,14 @@ type Diagnostics = {
 type BookAge = {
   symbol: string;
   ageMs: number;
+};
+
+type FixedBookSnapshot = {
+  symbol: string;
+  bids: BookLevel[];
+  asks: BookLevel[];
+  ready: boolean;
+  updatedAt: number;
 };
 
 const STALE_BOOK_AFTER_MS = 5_000;
@@ -57,21 +65,26 @@ export class OpportunityService {
 
       const evaluationStartedAt = Date.now();
 
-      const bookState = this.collectBookState(triangle, evaluationStartedAt);
-
-      if (!bookState) {
-        this.diagnostics.unavailable += 1;
-        continue;
-      }
-
-      if (bookState.maxBookAge > STALE_BOOK_AFTER_MS) {
-        this.diagnostics.unavailable += 1;
-        continue;
-      }
-
-      const opportunity = this.calculator.simulate(
+      const snapshotState = this.collectSnapshotState(
         triangle,
-        this.books,
+        evaluationStartedAt
+      );
+
+      if (!snapshotState) {
+        this.diagnostics.unavailable += 1;
+        continue;
+      }
+
+      const { snapshots, bookAges, maxBookAge } = snapshotState;
+
+      if (maxBookAge > STALE_BOOK_AFTER_MS) {
+        this.diagnostics.unavailable += 1;
+        continue;
+      }
+
+      const opportunity = this.calculator.simulateFromSnapshots(
+        triangle,
+        snapshots,
         config.trading.startNotional
       );
 
@@ -113,7 +126,7 @@ export class OpportunityService {
       const evaluationTime = decisionNow - evaluationStartedAt;
 
       void this.performanceLogWriter
-        .write(opportunity, evaluationTime, bookState.bookAges)
+        .write(opportunity, evaluationTime, bookAges)
         .catch((error) => {
           console.error('Failed to write performance log', error);
         });
@@ -128,10 +141,15 @@ export class OpportunityService {
     this.logDiagnosticsIfNeeded();
   }
 
-  private collectBookState(
+  private collectSnapshotState(
     triangle: Triangle,
     now: number
-  ): { bookAges: BookAge[]; maxBookAge: number } | null {
+  ): {
+    snapshots: Map<string, FixedBookSnapshot>;
+    bookAges: BookAge[];
+    maxBookAge: number;
+  } | null {
+    const snapshots = new Map<string, FixedBookSnapshot>();
     const bookAges: BookAge[] = [];
 
     for (const leg of triangle.legs) {
@@ -141,7 +159,19 @@ export class OpportunityService {
         return null;
       }
 
-      const snapshot = book.getSnapshot(5);
+      const snapshot = book.getSnapshot(100);
+
+      if (!snapshot.ready) {
+        return null;
+      }
+
+      snapshots.set(leg.symbol, {
+        symbol: snapshot.symbol,
+        bids: snapshot.bids,
+        asks: snapshot.asks,
+        ready: snapshot.ready,
+        updatedAt: snapshot.updatedAt
+      });
 
       bookAges.push({
         symbol: leg.symbol,
@@ -154,6 +184,7 @@ export class OpportunityService {
       : 0;
 
     return {
+      snapshots,
       bookAges,
       maxBookAge
     };
