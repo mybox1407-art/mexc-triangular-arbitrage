@@ -17,7 +17,9 @@ export class TelegramNotifier {
       : null;
 
     if (!this.enabled) {
-      logger.warn('Telegram notifications disabled: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set');
+      logger.warn(
+        'Telegram notifications disabled: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set'
+      );
     }
   }
 
@@ -25,22 +27,27 @@ export class TelegramNotifier {
     const legs = opportunity.legs
       .map(
         (leg, i) =>
-          `${i + 1}. ${leg.fromAsset}→${leg.toAsset} ` +
-          `(${leg.symbol}:${leg.side}) VWAP=${leg.vwap} ` +
-          `fee=${leg.feePaidInOutput} levels=${leg.levelsUsed}`
+          [
+            `${i + 1}. ${leg.fromAsset}->${leg.toAsset}`,
+            `   ${leg.symbol}:${leg.side}`,
+            `   VWAP=${leg.vwap}`,
+            `   fee=${leg.feePaidInOutput}`,
+            `   levels=${leg.levelsUsed}`
+          ].join('\n')
       )
-      .join('\n');
+      .join('\n\n');
 
     const text = [
-      '🔺 <b>Arbitrage opportunity</b>',
+      'Arbitrage opportunity',
       '',
-      `<b>Triangle:</b> ${opportunity.triangleId}`,
-      `<b>Start:</b> ${opportunity.startAmount} ${opportunity.startAsset}`,
-      `<b>Final:</b> ${opportunity.finalAmount}`,
-      `<b>Gross ROI (after fees):</b> ${(opportunity.grossRoiAfterFees * 100).toFixed(3)}%`,
-      `<b>Net ROI:</b> ${(opportunity.netRoi * 100).toFixed(3)}%`,
-      `<b>Expected profit:</b> ${opportunity.expectedProfit} ${opportunity.startAsset}`,
+      `Triangle: ${opportunity.triangleId}`,
+      `Start: ${opportunity.startAmount} ${opportunity.startAsset}`,
+      `Final: ${opportunity.finalAmount}`,
+      `Gross ROI (after fees): ${(opportunity.grossRoiAfterFees * 100).toFixed(3)}%`,
+      `Net ROI: ${(opportunity.netRoi * 100).toFixed(3)}%`,
+      `Expected profit: ${opportunity.expectedProfit} ${opportunity.startAsset}`,
       '',
+      'Legs:',
       legs
     ].join('\n');
 
@@ -59,19 +66,25 @@ export class TelegramNotifier {
         body: JSON.stringify({
           chat_id: config.telegram.chatId,
           text,
-          parse_mode: 'HTML',
           disable_web_page_preview: true
         }),
         signal: AbortSignal.timeout(10_000)
       });
 
+      const body = await response.text();
+
       if (!response.ok) {
-        const body = await response.text();
         logger.error(
-          { status: response.status, body },
+          { status: response.status, body, textPreview: text.slice(0, 500) },
           'Telegram sendMessage failed'
         );
+        return;
       }
+
+      logger.info(
+        { status: response.status, body },
+        'Telegram sendMessage succeeded'
+      );
     } catch (error) {
       logger.error({ err: error }, 'Telegram notification error');
     }
