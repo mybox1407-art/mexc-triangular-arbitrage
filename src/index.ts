@@ -337,11 +337,34 @@ async function main(): Promise<void> {
 
       await repository.saveOpportunity(opportunity);
 
-      void telegramNotifier
-        .sendOpportunity(opportunity)
-        .catch((error) => {
-          logger.error({ err: error }, 'Telegram notify failed');
-        });
+      logger.info(
+        {
+          triangle: opportunity.triangleId,
+          grossRoiAfterFees: opportunity.grossRoiAfterFees,
+          netRoi: opportunity.netRoi,
+          profit: opportunity.expectedProfit
+        },
+        'Sending Telegram opportunity notification'
+      );
+      
+      try {
+        await telegramNotifier.sendOpportunity(opportunity);
+      
+        logger.info(
+          {
+            triangle: opportunity.triangleId
+          },
+          'Telegram opportunity notification sent'
+        );
+      } catch (error) {
+        logger.error(
+          {
+            err: error,
+            triangle: opportunity.triangleId
+          },
+          'Telegram notify failed'
+        );
+      }
     }
   );
 
