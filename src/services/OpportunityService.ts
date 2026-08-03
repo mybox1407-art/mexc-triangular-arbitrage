@@ -28,6 +28,7 @@ type FixedBookSnapshot = {
 
 const STALE_BOOK_AFTER_MS = 5_000;
 const REPORT_THROTTLE_MS = 1_000;
+const FIRST_LEVEL_FALLBACK_MIN_GROSS_ROI_AFTER_FEES = 0.0025;
 
 export class OpportunityService {
   private readonly lastReported = new Map<string, number>();
@@ -100,10 +101,7 @@ export class OpportunityService {
         this.diagnostics.best = opportunity;
       }
 
-      if (
-        opportunity.grossRoiAfterFees <
-        config.trading.minGrossRoiAfterFees
-      ) {
+      if (!this.passesThreshold(opportunity)) {
         this.diagnostics.belowThreshold += 1;
         continue;
       }
@@ -139,6 +137,31 @@ export class OpportunityService {
     }
 
     this.logDiagnosticsIfNeeded();
+  }
+
+  private passesThreshold(opportunity: Opportunity): boolean {
+    if (
+      opportunity.grossRoiAfterFees >=
+      config.trading.minGrossRoiAfterFees
+    ) {
+      return true;
+    }
+
+    if (
+      opportunity.grossRoiAfterFees >=
+        FIRST_LEVEL_FALLBACK_MIN_GROSS_ROI_AFTER_FEES &&
+      opportunity.grossRoiAfterFees <
+        config.trading.minGrossRoiAfterFees &&
+      this.isFirstLevelOnly(opportunity)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isFirstLevelOnly(opportunity: Opportunity): boolean {
+    return opportunity.legs.every((leg) => leg.levelsUsed === 1);
   }
 
   private collectSnapshotState(
