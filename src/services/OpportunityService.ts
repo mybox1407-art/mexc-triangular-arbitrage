@@ -28,7 +28,7 @@ type FixedBookSnapshot = {
 
 const STALE_BOOK_AFTER_MS = 5_000;
 const REPORT_THROTTLE_MS = 1_000;
-const FIRST_LEVEL_FALLBACK_MIN_GROSS_ROI_AFTER_FEES = 0.0025;
+const FIRST_LEVEL_FALLBACK_MIN_GROSS_ROI_AFTER_FEES = 0.0023;
 
 export class OpportunityService {
   private readonly lastReported = new Map<string, number>();
