@@ -16,7 +16,7 @@ const HEADER = [
   'total_fee_rate',
   'total_fee_in_start_asset',
   'expected_profit',
-  'max_levels_used',  // ← ДОБАВЛЕНО
+  'max_levels_used',
   'leg_1_route',
   'leg_1_symbol',
   'leg_1_side',
@@ -68,6 +68,11 @@ export class CsvBestRouteWriter {
   constructor(private readonly filePath: string) {}
 
   async write(opportunity: Opportunity): Promise<void> {
+    // Записываем только положительные возможности
+    if (opportunity.expectedProfit <= 0) {
+      return;
+    }
+
     this.writeQueue = this.writeQueue.then(async () => {
       await this.ensureFile();
 
@@ -85,7 +90,7 @@ export class CsvBestRouteWriter {
         opportunity.totalFeeRate,
         opportunity.totalFeeInStartAsset,
         opportunity.expectedProfit,
-        Math.max(...opportunity.legs.map(leg => leg.levelsUsed)),  // ← ДОБАВЛЕНО
+        Math.max(...opportunity.legs.map(leg => leg.levelsUsed)),
         ...legValues(opportunity.legs[0]),
         ...legValues(opportunity.legs[1]),
         ...legValues(opportunity.legs[2])
