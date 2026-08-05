@@ -183,9 +183,10 @@ async function main(): Promise<void> {
   logger.info(
     {
       startAsset: config.trading.startAsset,
+      crossAssets: config.trading.crossAssets,
       maxPaidLegs: MAX_PAID_LEGS
     },
-    'Starting USDC low-fee triangular arbitrage scanner'
+    'Starting USDC low-fee triangular arbitrage scanner with cross-routes'
   );
 
   void telegramNotifier
@@ -213,24 +214,38 @@ async function main(): Promise<void> {
 
   const allTriangles = new TriangleBuilder().build(
     liquidSymbols,
-    config.trading.startAsset
+    config.trading.startAsset,
+    config.trading.crossAssets
   );
 
   const triangles = allTriangles.slice(0, MAX_TRIANGLES);
 
+  const directTriangles = triangles.filter(t => !t.isCrossRoute);
+  const crossTriangles = triangles.filter(t => t.isCrossRoute);
+
   logger.info(
     {
       allTrianglesCount: allTriangles.length,
+      directTrianglesCount: directTriangles.length,
+      crossTrianglesCount: crossTriangles.length,
       selectedTrianglesCount: triangles.length,
-      sampleTriangles: triangles.slice(0, 10).map((triangle) => ({
+      sampleDirectTriangles: directTriangles.slice(0, 5).map((triangle) => ({
         id: triangle.id,
+        legs: triangle.legs.map(
+          (leg) =>
+            `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
+        )
+      })),
+      sampleCrossTriangles: crossTriangles.slice(0, 5).map((triangle) => ({
+        id: triangle.id,
+        crossAsset: triangle.crossAsset,
         legs: triangle.legs.map(
           (leg) =>
             `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
         )
       }))
     },
-    'Built USDC triangles'
+    'Built USDC triangles with cross-routes'
   );
 
   if (triangles.length === 0) {
@@ -269,12 +284,17 @@ async function main(): Promise<void> {
     return paidLegs.length <= MAX_PAID_LEGS;
   });
 
+  const lowFeeDirectTriangles = lowFeeTriangles.filter(t => !t.isCrossRoute);
+  const lowFeeCrossTriangles = lowFeeTriangles.filter(t => t.isCrossRoute);
+
   logger.info(
     {
       symbolsWithAccountFees: takerFeesBySymbol.size,
       zeroFeeSymbols,
       candidateTrianglesCount: triangles.length,
       lowFeeTrianglesCount: lowFeeTriangles.length,
+      lowFeeDirectTrianglesCount: lowFeeDirectTriangles.length,
+      lowFeeCrossTrianglesCount: lowFeeCrossTriangles.length,
       maxPaidLegs: MAX_PAID_LEGS,
       lowFeeTriangleIds: lowFeeTriangles.map((triangle) => triangle.id)
     },
