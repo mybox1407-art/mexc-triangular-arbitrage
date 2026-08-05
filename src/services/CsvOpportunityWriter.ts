@@ -1,140 +1,131 @@
-import { createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
-import { stringify } from 'csv-stringify';
-import type { Opportunity } from '../domain/types.js';
-import type { Triangle } from '../domain/types.js';
+import { appendFile, mkdir, stat } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import type { Opportunity, SimulatedLeg, Triangle } from '../domain/types.js';
+
+const HEADER = [
+  'observed_at',
+  'triangle_id',
+  'start_asset',
+  'start_amount',
+  'final_amount',
+  'gross_roi_before_fees',
+  'gross_roi_after_fees',
+  'gross_roi_after_fees_pct',
+  'net_roi',
+  'net_roi_pct',
+  'total_fee_rate',
+  'total_fee_in_start_asset',
+  'expected_profit',
+  'max_levels_used',
+  'leg_1_route',
+  'leg_1_symbol',
+  'leg_1_side',
+  'leg_1_input',
+  'leg_1_output',
+  'leg_1_vwap',
+  'leg_1_fee',
+  'leg_1_levels',
+  'leg_2_route',
+  'leg_2_symbol',
+  'leg_2_side',
+  'leg_2_input',
+  'leg_2_output',
+  'leg_2_vwap',
+  'leg_2_fee',
+  'leg_2_levels',
+  'leg_3_route',
+  'leg_3_symbol',
+  'leg_3_side',
+  'leg_3_input',
+  'leg_3_output',
+  'leg_3_vwap',
+  'leg_3_fee',
+  'leg_3_levels',
+  'is_cross_route',
+  'cross_asset'
+].join(',');
+
+function csvValue(value: string | number | null | undefined | boolean): string {
+  const text = String(value ?? '');
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function legValues(leg: SimulatedLeg): Array<string | number> {
+  return [
+    `${leg.fromAsset}->${leg.toAsset}`,
+    leg.symbol,
+    leg.side,
+    leg.inputAmount,
+    leg.outputAmount,
+    leg.vwap,
+    leg.feePaidInOutput,
+    leg.levelsUsed
+  ];
+}
 
 export class CsvOpportunityWriter {
-  private readonly writer: ReturnType<typeof stringify>;
-  private readonly stream: ReturnType<typeof createWriteStream>;
   private initialized = false;
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly outputPath: string,
-    private readonly triangles?: Triangle[] // Добавлено для маппинга
-  ) {
-    this.stream = createWriteStream(outputPath);
-
-    this.writer = stringify({
-      header: true,
-      columns: [
-        'detectedAt',
-        'triangleId',
-        'startAsset',
-        'startAmount',
-        'finalAmount',
-        'expectedProfit',
-        'grossRoiBeforeFees',
-        'grossRoiAfterFees',
-        'netRoi',
-        'totalFeeRate',
-        'totalFeeInStartAsset',
-        'leg1Symbol',
-        'leg1Side',
-        'leg1FromAsset',
-        'leg1ToAsset',
-        'leg1InputAmount',
-        'leg1OutputAmount',
-        'leg1Vwap',
-        'leg1FeePaidInOutput',
-        'leg1LevelsUsed',
-        'leg2Symbol',
-        'leg2Side',
-        'leg2FromAsset',
-        'leg2ToAsset',
-        'leg2InputAmount',
-        'leg2OutputAmount',
-        'leg2Vwap',
-        'leg2FeePaidInOutput',
-        'leg2LevelsUsed',
-        'leg3Symbol',
-        'leg3Side',
-        'leg3FromAsset',
-        'leg3ToAsset',
-        'leg3InputAmount',
-        'leg3OutputAmount',
-        'leg3Vwap',
-        'leg3FeePaidInOutput',
-        'leg3LevelsUsed',
-        'isCrossRoute',        // НОВОЕ
-        'crossAsset'           // НОВОЕ
-      ],
-      cast: {
-        date: (value) => value.toISOString()
-      }
-    });
-
-    void pipeline(this.writer, this.stream).catch(() => {
-      // Ignore pipeline errors
-    });
-  }
+    private readonly filePath: string,
+    private readonly triangles?: Triangle[]
+  ) {}
 
   async write(
     opportunity: Opportunity,
-    triangle?: Triangle // Добавлено
+    triangle?: Triangle
   ): Promise<void> {
-    if (!this.initialized) {
-      await new Promise<void>((resolve) => {
-        this.stream.on('open', () => resolve());
-      });
-      this.initialized = true;
-    }
+    this.writeQueue = this.writeQueue.then(async () => {
+      await this.ensureFile();
 
-    const record: Record<string, unknown> = {
-      detectedAt: opportunity.detectedAt,
-      triangleId: opportunity.triangleId,
-      startAsset: opportunity.startAsset,
-      startAmount: opportunity.startAmount,
-      finalAmount: opportunity.finalAmount,
-      expectedProfit: opportunity.expectedProfit,
-      grossRoiBeforeFees: opportunity.grossRoiBeforeFees,
-      grossRoiAfterFees: opportunity.grossRoiAfterFees,
-      netRoi: opportunity.netRoi,
-      totalFeeRate: opportunity.totalFeeRate,
-      totalFeeInStartAsset: opportunity.totalFeeInStartAsset,
-      leg1Symbol: opportunity.legs[0].symbol,
-      leg1Side: opportunity.legs[0].side,
-      leg1FromAsset: opportunity.legs[0].fromAsset,
-      leg1ToAsset: opportunity.legs[0].toAsset,
-      leg1InputAmount: opportunity.legs[0].inputAmount,
-      leg1OutputAmount: opportunity.legs[0].outputAmount,
-      leg1Vwap: opportunity.legs[0].vwap,
-      leg1FeePaidInOutput: opportunity.legs[0].feePaidInOutput,
-      leg1LevelsUsed: opportunity.legs[0].levelsUsed,
-      leg2Symbol: opportunity.legs[1].symbol,
-      leg2Side: opportunity.legs[1].side,
-      leg2FromAsset: opportunity.legs[1].fromAsset,
-      leg2ToAsset: opportunity.legs[1].toAsset,
-      leg2InputAmount: opportunity.legs[1].inputAmount,
-      leg2OutputAmount: opportunity.legs[1].outputAmount,
-      leg2Vwap: opportunity.legs[1].vwap,
-      leg2FeePaidInOutput: opportunity.legs[1].feePaidInOutput,
-      leg2LevelsUsed: opportunity.legs[1].levelsUsed,
-      leg3Symbol: opportunity.legs[2].symbol,
-      leg3Side: opportunity.legs[2].side,
-      leg3FromAsset: opportunity.legs[2].fromAsset,
-      leg3ToAsset: opportunity.legs[2].toAsset,
-      leg3InputAmount: opportunity.legs[2].inputAmount,
-      leg3OutputAmount: opportunity.legs[2].outputAmount,
-      leg3Vwap: opportunity.legs[2].vwap,
-      leg3FeePaidInOutput: opportunity.legs[2].feePaidInOutput,
-      leg3LevelsUsed: opportunity.legs[2].levelsUsed,
-      isCrossRoute: triangle?.isCrossRoute ?? false,    // НОВОЕ
-      crossAsset: triangle?.crossAsset ?? null          // НОВОЕ
-    };
+      const row = [
+        opportunity.detectedAt.toISOString(),
+        opportunity.triangleId,
+        opportunity.startAsset,
+        opportunity.startAmount,
+        opportunity.finalAmount,
+        opportunity.grossRoiBeforeFees,
+        opportunity.grossRoiAfterFees,
+        opportunity.grossRoiAfterFees * 100,
+        opportunity.netRoi,
+        opportunity.netRoi * 100,
+        opportunity.totalFeeRate,
+        opportunity.totalFeeInStartAsset,
+        opportunity.expectedProfit,
+        Math.max(...opportunity.legs.map(leg => leg.levelsUsed)),
+        ...legValues(opportunity.legs[0]),
+        ...legValues(opportunity.legs[1]),
+        ...legValues(opportunity.legs[2]),
+        triangle?.isCrossRoute ?? false,
+        triangle?.crossAsset ?? null
+      ]
+        .map(csvValue)
+        .join(',');
 
-    this.writer.write(record);
-
-    await new Promise<void>((resolve) => {
-      this.writer.once('drain', resolve);
+      await appendFile(this.filePath, `${row}\n`, 'utf8');
     });
+
+    return this.writeQueue;
   }
 
-  async close(): Promise<void> {
-    this.writer.end();
+  private async ensureFile(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
 
-    await new Promise<void>((resolve) => {
-      this.stream.once('close', resolve);
-    });
+    await mkdir(dirname(this.filePath), { recursive: true });
+
+    try {
+      const file = await stat(this.filePath);
+
+      if (file.size === 0) {
+        await appendFile(this.filePath, `${HEADER}\n`, 'utf8');
+      }
+    } catch {
+      await appendFile(this.filePath, `${HEADER}\n`, 'utf8');
+    }
+
+    this.initialized = true;
   }
 }
