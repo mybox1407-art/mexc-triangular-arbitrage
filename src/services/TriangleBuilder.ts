@@ -7,7 +7,11 @@ interface DirectedEdge {
 }
 
 export class TriangleBuilder {
-  build(symbols: SymbolInfo[], startAsset: string): Triangle[] {
+  build(
+    symbols: SymbolInfo[],
+    startAsset: string,
+    crossAssets: string[] = []
+  ): Triangle[] {
     const edges = this.createEdges(symbols);
     const byFrom = new Map<string, DirectedEdge[]>();
 
@@ -19,6 +23,8 @@ export class TriangleBuilder {
 
     const triangles = new Map<string, Triangle>();
 
+    // ========== ТИП 1: Прямые треугольники ==========
+    // USDC → X → Y → USDC
     for (const first of byFrom.get(startAsset) ?? []) {
       for (const second of byFrom.get(first.toAsset) ?? []) {
         if (second.toAsset === startAsset) continue;
@@ -32,7 +38,7 @@ export class TriangleBuilder {
             third.leg
           ];
 
-          const id = legs.map((leg) => `${leg.symbol}:${leg.side}`).join('|');
+          const id = `direct:${legs.map((leg) => `${leg.symbol}:${leg.side}`).join('|')}`;
 
           triangles.set(id, {
             id,
@@ -41,6 +47,51 @@ export class TriangleBuilder {
             middleAsset2: second.toAsset,
             legs
           });
+        }
+      }
+    }
+
+    // ========== ТИП 2: Кросс-маршруты через стейблы ==========
+    // USDC → [USDT|FDUSD|...] → X → USDC
+    for (const crossAsset of crossAssets) {
+      const crossEdges = byFrom.get(crossAsset) ?? [];
+      
+      // Находим все рёбра из startAsset в crossAsset
+      for (const crossEdge of byFrom.get(startAsset) ?? []) {
+        if (crossEdge.toAsset !== crossAsset) continue;
+
+        // Из crossAsset → X (где X ≠ startAsset, X ≠ crossAsset)
+        for (const middleEdge of crossEdges) {
+          if (
+            middleEdge.toAsset === startAsset ||
+            middleEdge.toAsset === crossAsset ||
+            middleEdge.toAsset === 'USDC'
+          ) {
+            continue;
+          }
+
+          // Из X → startAsset (возврат)
+          for (const returnEdge of byFrom.get(middleEdge.toAsset) ?? []) {
+            if (returnEdge.toAsset !== startAsset) continue;
+
+            const legs: [TriangleLeg, TriangleLeg, TriangleLeg] = [
+              crossEdge.leg,     // startAsset → crossAsset (USDC → USDT)
+              middleEdge.leg,    // crossAsset → X (USDT → SOL)
+              returnEdge.leg     // X → startAsset (SOL → USDC)
+            ];
+
+            const id = `cross:${crossAsset}:${legs.map((leg) => `${leg.symbol}:${leg.side}`).join('|')}`;
+
+            triangles.set(id, {
+              id,
+              startAsset,
+              middleAsset1: crossAsset,
+              middleAsset2: middleEdge.toAsset,
+              legs,
+              isCrossRoute: true,
+              crossAsset
+            });
+          }
         }
       }
     }
