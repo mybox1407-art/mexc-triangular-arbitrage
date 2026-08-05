@@ -151,7 +151,7 @@ const rest = new MexcRestClient();
 
 const csvWriter = new CsvOpportunityWriter(
   config.csvOpportunitiesPath,
-  readyTriangles
+  triangles
 );
 
 const csvBestRouteWriter = new CsvBestRouteWriter(
