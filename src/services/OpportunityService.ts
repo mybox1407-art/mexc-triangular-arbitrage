@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
 import type { BookLevel, Opportunity, Triangle } from '../domain/types.js';
 import { ArbitrageCalculator } from './ArbitrageCalculator.js';
+import { CsvBestRouteWriter } from './CsvBestRouteWriter.js'; // ДОБАВИТЬ
 import { PerformanceLogWriter } from './PerformanceLogWriter.js';
 
 type Diagnostics = {
