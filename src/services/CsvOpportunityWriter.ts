@@ -67,10 +67,7 @@ export class CsvOpportunityWriter {
   private initialized = false;
   private writeQueue: Promise<void> = Promise.resolve();
 
-  constructor(
-    private readonly filePath: string,
-    private readonly triangles?: Triangle[]
-  ) {}
+  constructor(private readonly filePath: string) {}
 
   async write(
     opportunity: Opportunity,
