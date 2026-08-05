@@ -75,7 +75,12 @@ export const config = {
 
   trading: {
     liveTrading: env('LIVE_TRADING', 'false') === 'true',
-    startAsset: env('START_ASSET', 'USDT').toUpperCase(),
+    startAsset: env('START_ASSET', 'USDC').toUpperCase(),
+
+    // Кросс-активы для дополнительных маршрутов (стейблкоины)
+    crossAssets: env('CROSS_ASSETS', 'USDT,FDUSD,USDS,USD1,USDD,TUSD,FRAX,EURITE')
+      .split(',')
+      .map(s => s.trim().toUpperCase()),
 
     startNotional: positiveNumberEnv('START_NOTIONAL', '10'),
 
