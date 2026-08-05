@@ -150,8 +150,7 @@ const logger = pino({ level: config.logLevel });
 const rest = new MexcRestClient();
 
 const csvWriter = new CsvOpportunityWriter(
-  config.csvOpportunitiesPath,
-  triangles
+  config.csvOpportunitiesPath
 );
 
 const csvBestRouteWriter = new CsvBestRouteWriter(
@@ -395,7 +394,8 @@ async function main(): Promise<void> {
     calculator,
     performanceLogWriter,
     async (opportunity) => {
-      await csvWriter.write(opportunity);
+      const triangle = readyTriangles.find(t => t.id === opportunity.triangleId);
+      await csvWriter.write(opportunity, triangle);
 
       logger.info(
         {
