@@ -8,6 +8,7 @@ import { MexcRestClient } from './mexc/MexcRestClient.js';
 import { MexcTradeFeeLoader } from './mexc/MexcTradeFeeLoader.js';
 import { ArbitrageCalculator } from './services/ArbitrageCalculator.js';
 import { CsvOpportunityWriter } from './services/CsvOpportunityWriter.js';
+import { CsvBestRouteWriter } from './services/CsvBestRouteWriter.js';
 import { OpportunityService } from './services/OpportunityService.js';
 import { PerformanceLogWriter } from './services/PerformanceLogWriter.js';
 import { TelegramNotifier } from './services/TelegramNotifier.js';
@@ -150,6 +151,10 @@ const rest = new MexcRestClient();
 
 const csvWriter = new CsvOpportunityWriter(
   config.csvOpportunitiesPath
+);
+
+const csvBestRouteWriter = new CsvBestRouteWriter(
+  config.csvBestRoutesPath
 );
 
 const performanceLogWriter = new PerformanceLogWriter(
