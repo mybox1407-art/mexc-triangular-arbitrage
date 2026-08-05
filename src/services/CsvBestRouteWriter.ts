@@ -1,6 +1,6 @@
 import { appendFile, mkdir, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { Opportunity, SimulatedLeg } from '../domain/types.js';
+import type { Opportunity, SimulatedLeg, Triangle } from '../domain/types.js';
 
 const HEADER = [
   'observed_at',
@@ -40,10 +40,12 @@ const HEADER = [
   'leg_3_output',
   'leg_3_vwap',
   'leg_3_fee',
-  'leg_3_levels'
+  'leg_3_levels',
+  'is_cross_route',
+  'cross_asset'
 ].join(',');
 
-function csvValue(value: string | number | null | undefined): string {
+function csvValue(value: string | number | null | undefined | boolean): string {
   const text = String(value ?? '');
   return `"${text.replaceAll('"', '""')}"`;
 }
@@ -67,7 +69,10 @@ export class CsvBestRouteWriter {
 
   constructor(private readonly filePath: string) {}
 
-  async write(opportunity: Opportunity): Promise<void> {
+  async write(
+    opportunity: Opportunity,
+    triangle?: Triangle
+  ): Promise<void> {
     // Записываем только положительные возможности
     if (opportunity.expectedProfit <= 0) {
       return;
@@ -93,7 +98,9 @@ export class CsvBestRouteWriter {
         Math.max(...opportunity.legs.map(leg => leg.levelsUsed)),
         ...legValues(opportunity.legs[0]),
         ...legValues(opportunity.legs[1]),
-        ...legValues(opportunity.legs[2])
+        ...legValues(opportunity.legs[2]),
+        triangle?.isCrossRoute ?? false,
+        triangle?.crossAsset ?? null
       ]
         .map(csvValue)
         .join(',');
