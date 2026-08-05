@@ -42,6 +42,8 @@ export interface Triangle {
   middleAsset1: string;
   middleAsset2: string;
   legs: [TriangleLeg, TriangleLeg, TriangleLeg];
+  isCrossRoute?: boolean;
+  crossAsset?: string;
 }
 
 export interface SimulatedLeg {
