@@ -290,13 +290,13 @@ async function main(): Promise<void> {
   logger.info(
     {
       symbolsWithAccountFees: takerFeesBySymbol.size,
-      zeroFeeSymbols,
+      zeroFeeSymbolsCount: zeroFeeSymbols.length,
+      zeroFeeSymbols: zeroFeeSymbols.slice(0, 20),
       candidateTrianglesCount: triangles.length,
       lowFeeTrianglesCount: lowFeeTriangles.length,
       lowFeeDirectTrianglesCount: lowFeeDirectTriangles.length,
       lowFeeCrossTrianglesCount: lowFeeCrossTriangles.length,
-      maxPaidLegs: MAX_PAID_LEGS,
-      lowFeeTriangleIds: lowFeeTriangles.map((triangle) => triangle.id)
+      maxPaidLegs: MAX_PAID_LEGS
     },
     'Filtered USDC low-fee triangles'
   );
