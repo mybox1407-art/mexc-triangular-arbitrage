@@ -2,7 +2,6 @@ import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
 import type { BookLevel, Opportunity, Triangle } from '../domain/types.js';
 import { ArbitrageCalculator } from './ArbitrageCalculator.js';
-import { CsvBestRouteWriter } from './CsvBestRouteWriter.js';
 import { PerformanceLogWriter } from './PerformanceLogWriter.js';
 
 type Diagnostics = {
@@ -34,10 +33,6 @@ export class OpportunityService {
   private readonly lastReported = new Map<string, number>();
   private readonly inFlightTriangles = new Set<string>();
 
-  private readonly bestRouteWriter = new CsvBestRouteWriter(
-    config.csvBestRoutesPath
-  );
-
   private diagnostics: Diagnostics = {
     evaluated: 0,
     unavailable: 0,
@@ -53,7 +48,8 @@ export class OpportunityService {
     private readonly books: Map<string, OrderBook>,
     private readonly calculator: ArbitrageCalculator,
     private readonly performanceLogWriter: PerformanceLogWriter,
-    private readonly onOpportunity: (opportunity: Opportunity) => Promise<void>
+    private readonly onOpportunity: (opportunity: Opportunity) => Promise<void>,
+    private readonly bestRouteWriter?: CsvBestRouteWriter // НОВЫЙ параметр (опционально)
   ) {}
 
   async evaluateAffected(symbol: string): Promise<void> {
@@ -264,8 +260,11 @@ export class OpportunityService {
       staleBooksCount: staleBooks.length
     });
 
-    if (best) {
-      void this.bestRouteWriter.write(best).catch((error) => {
+    if (best && this.bestRouteWriter) {
+      // Найдём треугольник для best
+      const bestTriangle = this.triangles.find(t => t.id === best.triangleId);
+      
+      void this.bestRouteWriter.write(best, bestTriangle).catch((error) => {
         console.error(
           'Failed to write best paper route CSV',
           error
