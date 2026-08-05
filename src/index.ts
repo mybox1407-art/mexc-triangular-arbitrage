@@ -449,7 +449,8 @@ async function main(): Promise<void> {
           'Telegram notify failed'
         );
       }
-    }
+    },
+    csvBestRouteWriter // НОВЫЙ параметр
   );
 
   const ws = new MexcPublicWs(
