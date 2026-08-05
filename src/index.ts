@@ -150,7 +150,8 @@ const logger = pino({ level: config.logLevel });
 const rest = new MexcRestClient();
 
 const csvWriter = new CsvOpportunityWriter(
-  config.csvOpportunitiesPath
+  config.csvOpportunitiesPath,
+  readyTriangles
 );
 
 const csvBestRouteWriter = new CsvBestRouteWriter(
