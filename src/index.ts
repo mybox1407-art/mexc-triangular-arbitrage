@@ -17,154 +17,22 @@ import { TriangleBuilder } from './services/TriangleBuilder.js';
 import { OrderExecutionService, OrderExecutionConfig } from './services/OrderExecutionService.js';
 
 const ALLOWED_ASSETS = new Set([
-  'USDC',
-  'USDT',
-  'BTC',
-  'ETH',
-  'SOL',
-  'XRP',
-  'DOGE',
-  'LTC',
-  'BCH',
-  'TRX',
-  'ADA',
-  'LINK',
-  'AVAX',
-  'DOT',
-  'TON',
-  'BNB',
-  'SUI',
-  'APT',
-  'NEAR',
-  'ATOM',
-  'FIL',
-  'ARB',
-  'OP',
-  'AAVE',
-  'UNI',
-  'ETC',
-  'XLM',
-  'HBAR',
-  'ICP',
-  'INJ',
-  'SEI',
-  'TIA',
-  'WLD',
-  'CRV',
-  'MKR',
-  'MATIC',
-  'POL',
-  'PEPE',
-  'SHIB',
-  'FLOKI',
-  'WIF',
-  'BONK',
-  'PENGU',
-  'JUP',
-  'KAS',
-  'RUNE',
-  'BOME',
-  'NOT',
-  'ORDI',
-  'PNUT',
-  'POPCAT',
-  'MEW',
-  'CHILLGUY',
-  'TAO',
-  'FET',
-  'GOAT',
-  'MYRO',
-  'NEIRO',
-  'THE',
-  'PONKE',
-  'TRUMP',
-  'MELANIA',
-  'PI',
-  'SAND',
-  'MANA',
-  'GRT',
-  'FTM',
-  'ALGO',
-  'VET',
-  'THETA',
-  'EGLD',
-  'AXS',
-  'FLOW',
-  'XTZ',
-  'KAVA',
-  'IOTA',
-  'ZIL',
-  'ICX',
-  'ENJ',
-  'CHZ',
-  'BAT',
-  'ZRX',
-  'LRC',
-  'CELO',
-  'ONE',
-  'QTUM',
-  'RVN',
-  'DASH',
-  'ZEC',
-  'XMR',
-  'SC',
-  'DGB',
-  'ONT',
-  'GALA',   
-  'IMX',    
-  'LDO',    
-  'RPL',    
-  'GMX',    
-  'RNDR',   
-  'AGIX',   
-  'OCEAN',  
-  'SXP',    
-  'CFX',    
-  'BEAM',   
-  'STRK',   
-  'PYTH',   
-  'TNSR',   
-  'JTO',
-  'SOMI',
-  'AKT',      
-  'RENDER',   
-  'VRA',      
-  'RLC',      
-  'TRAC',     
-  'VIRTUAL',  
-  'OLAS',     
-  'KITE',     
-  'NOS',      
-  'PHB',      
-  'U2U',      
-  'CTX',      
-  'QNT',
-  'MANTRA',
-  'REZ',
-  'DYM',
-  'METIS',
-  'PENDLE',
-  'PIXEL',
-  'PORTAL',
-  'ALT',
-  'MANTA',
-  'AEVO',
-  'ETHFI',
-  'ENA',
-  'SLERF',
-  'OMNI',
-  'REI',
-  'XAI',
-  'METAFI',
-  'RATS',
-  '1000SATS',
-  'SATS',
-  'DEGEN',
-  'ACE',
-  'NFP',
-  'AI',
-  'BABYDOGE',
-  'LEASH'
+  'USDC', 'USDT', 'BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'LTC', 'BCH', 'TRX',
+  'ADA', 'LINK', 'AVAX', 'DOT', 'TON', 'BNB', 'SUI', 'APT', 'NEAR', 'ATOM',
+  'FIL', 'ARB', 'OP', 'AAVE', 'UNI', 'ETC', 'XLM', 'HBAR', 'ICP', 'INJ', 'SEI',
+  'TIA', 'WLD', 'CRV', 'MKR', 'MATIC', 'POL', 'PEPE', 'SHIB', 'FLOKI', 'WIF',
+  'BONK', 'PENGU', 'JUP', 'KAS', 'RUNE', 'BOME', 'NOT', 'ORDI', 'PNUT', 'POPCAT',
+  'MEW', 'CHILLGUY', 'TAO', 'FET', 'GOAT', 'MYRO', 'NEIRO', 'THE', 'PONKE',
+  'TRUMP', 'MELANIA', 'PI', 'SAND', 'MANA', 'GRT', 'FTM', 'ALGO', 'VET', 'THETA',
+  'EGLD', 'AXS', 'FLOW', 'XTZ', 'KAVA', 'IOTA', 'ZIL', 'ICX', 'ENJ', 'CHZ',
+  'BAT', 'ZRX', 'LRC', 'CELO', 'ONE', 'QTUM', 'RVN', 'DASH', 'ZEC', 'XMR',
+  'SC', 'DGB', 'ONT', 'GALA', 'IMX', 'LDO', 'RPL', 'GMX', 'RNDR', 'AGIX',
+  'OCEAN', 'SXP', 'CFX', 'BEAM', 'STRK', 'PYTH', 'TNSR', 'JTO', 'SOMI', 'AKT',
+  'RENDER', 'VRA', 'RLC', 'TRAC', 'VIRTUAL', 'OLAS', 'KITE', 'NOS', 'PHB',
+  'U2U', 'CTX', 'QNT', 'MANTRA', 'REZ', 'DYM', 'METIS', 'PENDLE', 'PIXEL',
+  'PORTAL', 'ALT', 'MANTA', 'AEVO', 'ETHFI', 'ENA', 'SLERF', 'OMNI', 'REI',
+  'XAI', 'METAFI', 'RATS', '1000SATS', 'SATS', 'DEGEN', 'ACE', 'NFP', 'AI',
+  'BABYDOGE', 'LEASH'
 ]);
 
 const MAX_TRIANGLES = Number.POSITIVE_INFINITY;
@@ -177,61 +45,40 @@ const ZERO_FEE_EPSILON = 1e-12;
 const logger = pino({ level: config.logLevel });
 const rest = new MexcRestClient();
 
-const csvWriter = new CsvOpportunityWriter(
-  config.csvOpportunitiesPath
-);
-
-const csvBestRouteWriter = new CsvBestRouteWriter(
-  config.csvBestRoutesPath
-);
-
-const performanceLogWriter = new PerformanceLogWriter(
-  config.performanceLogPath
-);
-
+const csvWriter = new CsvOpportunityWriter(config.csvOpportunitiesPath);
+const csvBestRouteWriter = new CsvBestRouteWriter(config.csvBestRoutesPath);
+const performanceLogWriter = new PerformanceLogWriter(config.performanceLogPath);
 const telegramNotifier = new TelegramNotifier();
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main(): Promise<void> {
-  // === ВАЛИДАЦИЯ КОНФИГУРАЦИИ ===
   ConfigValidator.validateOrThrow(config);
   logger.info('✅ Configuration validated');
 
   if (config.trading.liveTrading) {
-    throw new Error(
-      'LIVE_TRADING=true is intentionally blocked in MVP. First collect paper-trading statistics.'
-    );
+    throw new Error('LIVE_TRADING=true is intentionally blocked in MVP. First collect paper-trading statistics.');
   }
 
   if (!config.mexc.apiKey || !config.mexc.apiSecret) {
-    throw new Error(
-      'MEXC_API_KEY and MEXC_API_SECRET are required for symbol-specific fee mode.'
-    );
+    throw new Error('MEXC_API_KEY and MEXC_API_SECRET are required for symbol-specific fee mode.');
   }
 
   if (config.trading.startAsset !== 'USDC') {
-    throw new Error(
-      'USDC scanner requires START_ASSET=USDC in .env.'
-    );
+    throw new Error('USDC scanner requires START_ASSET=USDC in .env.');
   }
 
-  logger.info(
-    {
-      startAsset: config.trading.startAsset,
-      crossAssets: config.trading.crossAssets,
-      maxPaidLegs: MAX_PAID_LEGS
-    },
-    'Starting USDC low-fee triangular arbitrage scanner with cross-routes'
-  );
+  logger.info({
+    startAsset: config.trading.startAsset,
+    crossAssets: config.trading.crossAssets,
+    maxPaidLegs: MAX_PAID_LEGS
+  }, 'Starting USDC low-fee triangular arbitrage scanner with cross-routes');
 
-  // Отправка баланса при старте
+  const authenticatedClient = new MexcAuthenticatedClient();
+
   (async () => {
     try {
       await telegramNotifier.send('✅ Arbitrage scanner started');
-      
-      // Получить баланс и отправить
       const balances = await authenticatedClient.getAccountBalances();
       await telegramNotifier.sendBalanceUpdate(balances, 'Startup Balance');
     } catch (error) {
@@ -240,76 +87,45 @@ async function main(): Promise<void> {
   })();
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
-
   const liquidSymbols = symbols.filter(
-    (symbol) =>
-      ALLOWED_ASSETS.has(symbol.baseAsset) &&
-      ALLOWED_ASSETS.has(symbol.quoteAsset)
+    (symbol) => ALLOWED_ASSETS.has(symbol.baseAsset) && ALLOWED_ASSETS.has(symbol.quoteAsset)
   );
 
-  logger.info(
-    {
-      totalSymbols: symbols.length,
-      totalLiquidSymbols: liquidSymbols.length,
-      liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
-    },
-    'Filtered liquid symbols'
-  );
+  logger.info({
+    totalSymbols: symbols.length,
+    totalLiquidSymbols: liquidSymbols.length,
+    liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
+  }, 'Filtered liquid symbols');
 
-  const allTriangles = new TriangleBuilder().build(
-    liquidSymbols,
-    config.trading.startAsset,
-    config.trading.crossAssets
-  );
-
+  const allTriangles = new TriangleBuilder().build(liquidSymbols, config.trading.startAsset, config.trading.crossAssets);
   const triangles = allTriangles.slice(0, MAX_TRIANGLES);
 
   const directTriangles = triangles.filter(t => !t.isCrossRoute);
   const crossTriangles = triangles.filter(t => t.isCrossRoute);
 
-  logger.info(
-    {
-      allTrianglesCount: allTriangles.length,
-      directTrianglesCount: directTriangles.length,
-      crossTrianglesCount: crossTriangles.length,
-      selectedTrianglesCount: triangles.length,
-      sampleDirectTriangles: directTriangles.slice(0, 5).map((triangle) => ({
-        id: triangle.id,
-        legs: triangle.legs.map(
-          (leg) =>
-            `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
-        )
-      })),
-      sampleCrossTriangles: crossTriangles.slice(0, 5).map((triangle) => ({
-        id: triangle.id,
-        crossAsset: triangle.crossAsset,
-        legs: triangle.legs.map(
-          (leg) =>
-            `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`
-        )
-      }))
-    },
-    'Built USDC triangles with cross-routes'
-  );
+  logger.info({
+    allTrianglesCount: allTriangles.length,
+    directTrianglesCount: directTriangles.length,
+    crossTrianglesCount: crossTriangles.length,
+    selectedTrianglesCount: triangles.length,
+    sampleDirectTriangles: directTriangles.slice(0, 5).map((triangle) => ({
+      id: triangle.id,
+      legs: triangle.legs.map((leg) => `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`)
+    })),
+    sampleCrossTriangles: crossTriangles.slice(0, 5).map((triangle) => ({
+      id: triangle.id,
+      crossAsset: triangle.crossAsset,
+      legs: triangle.legs.map((leg) => `${leg.fromAsset}->${leg.toAsset}(${leg.symbol}:${leg.side})`)
+    }))
+  }, 'Built USDC triangles with cross-routes');
 
   if (triangles.length === 0) {
     throw new Error('No USDC triangles found for allowed assets.');
   }
 
-  const candidateSymbols = [
-    ...new Set(
-      triangles.flatMap((triangle) =>
-        triangle.legs.map((leg) => leg.symbol)
-      )
-    )
-  ];
+  const candidateSymbols = [...new Set(triangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol)))];
 
-  const authenticatedClient = new MexcAuthenticatedClient();
-
-  const takerFeesBySymbol = await new MexcTradeFeeLoader(
-    authenticatedClient,
-    logger
-  ).loadTakerFees(candidateSymbols);
+  const takerFeesBySymbol = await new MexcTradeFeeLoader(authenticatedClient, logger).loadTakerFees(candidateSymbols);
 
   const zeroFeeSymbols = [...takerFeesBySymbol.entries()]
     .filter(([, feeRate]) => Math.abs(feeRate) <= ZERO_FEE_EPSILON)
@@ -318,55 +134,36 @@ async function main(): Promise<void> {
   const lowFeeTriangles = triangles.filter((triangle) => {
     const paidLegs = triangle.legs.filter((leg) => {
       const feeRate = takerFeesBySymbol.get(leg.symbol.toUpperCase());
-
-      return (
-        feeRate === undefined ||
-        Math.abs(feeRate) > ZERO_FEE_EPSILON
-      );
+      return feeRate === undefined || Math.abs(feeRate) > ZERO_FEE_EPSILON;
     });
-
     return paidLegs.length <= MAX_PAID_LEGS;
   });
 
   const lowFeeDirectTriangles = lowFeeTriangles.filter(t => !t.isCrossRoute);
   const lowFeeCrossTriangles = lowFeeTriangles.filter(t => t.isCrossRoute);
 
-  logger.info(
-    {
-      symbolsWithAccountFees: takerFeesBySymbol.size,
-      zeroFeeSymbolsCount: zeroFeeSymbols.length,
-      zeroFeeSymbols: zeroFeeSymbols.slice(0, 20),
-      candidateTrianglesCount: triangles.length,
-      lowFeeTrianglesCount: lowFeeTriangles.length,
-      lowFeeDirectTrianglesCount: lowFeeDirectTriangles.length,
-      lowFeeCrossTrianglesCount: lowFeeCrossTriangles.length,
-      maxPaidLegs: MAX_PAID_LEGS
-    },
-    'Filtered USDC low-fee triangles'
-  );
+  logger.info({
+    symbolsWithAccountFees: takerFeesBySymbol.size,
+    zeroFeeSymbolsCount: zeroFeeSymbols.length,
+    zeroFeeSymbols: zeroFeeSymbols.slice(0, 20),
+    candidateTrianglesCount: triangles.length,
+    lowFeeTrianglesCount: lowFeeTriangles.length,
+    lowFeeDirectTrianglesCount: lowFeeDirectTriangles.length,
+    lowFeeCrossTrianglesCount: lowFeeCrossTriangles.length,
+    maxPaidLegs: MAX_PAID_LEGS
+  }, 'Filtered USDC low-fee triangles');
 
   if (lowFeeTriangles.length === 0) {
-    throw new Error(
-      'No USDC triangles with no more than one paid leg were found.'
-    );
+    throw new Error('No USDC triangles with no more than one paid leg were found.');
   }
 
-  const usedSymbols = [
-    ...new Set(
-      lowFeeTriangles.flatMap((triangle) =>
-        triangle.legs.map((leg) => leg.symbol)
-      )
-    )
-  ];
+  const usedSymbols = [...new Set(lowFeeTriangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol)))];
 
-  logger.info(
-    {
-      selectedTriangles: lowFeeTriangles.length,
-      subscribedPairs: usedSymbols.length,
-      usedSymbols
-    },
-    'USDC low-fee scanner initialized'
-  );
+  logger.info({
+    selectedTriangles: lowFeeTriangles.length,
+    subscribedPairs: usedSymbols.length,
+    usedSymbols
+  }, 'USDC low-fee scanner initialized');
 
   const books = new Map<string, OrderBook>();
 
@@ -374,25 +171,13 @@ async function main(): Promise<void> {
     try {
       const book = new OrderBook(symbol);
       const snapshot = await rest.getDepth(symbol, 100);
-
       book.loadSnapshot(snapshot);
       books.set(symbol, book);
-
-      logger.info(
-        {
-          symbol,
-          loadedBooks: books.size,
-          totalBooks: usedSymbols.length
-        },
-        'Order book snapshot loaded'
-      );
+      logger.info({ symbol, loadedBooks: books.size, totalBooks: usedSymbols.length }, 'Order book snapshot loaded');
     } catch (error) {
-      logger.warn(
-        { err: error, symbol },
-        'Cannot load order book snapshot; symbol will be skipped'
-      );
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn({ err: error, symbol, errorMessage }, 'Cannot load order book snapshot; symbol will be skipped');
     }
-
     await sleep(SNAPSHOT_DELAY_MS);
   }
 
@@ -401,33 +186,21 @@ async function main(): Promise<void> {
   );
 
   if (readyTriangles.length === 0) {
-    throw new Error(
-      'No low-fee USDC triangles with fully initialized order books.'
-    );
+    throw new Error('No low-fee USDC triangles with fully initialized order books.');
   }
 
-  const readySymbols = [
-    ...new Set(
-      readyTriangles.flatMap((triangle) =>
-        triangle.legs.map((leg) => leg.symbol)
-      )
-    )
-  ];
+  const readySymbols = [...new Set(readyTriangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol)))];
 
-  logger.info(
-    {
-      requestedLowFeeTriangles: lowFeeTriangles.length,
-      readyLowFeeTriangles: readyTriangles.length,
-      loadedBooks: books.size,
-      subscribedPairs: readySymbols.length,
-      readySymbols
-    },
-    'USDC low-fee order books initialized'
-  );
+  logger.info({
+    requestedLowFeeTriangles: lowFeeTriangles.length,
+    readyLowFeeTriangles: readyTriangles.length,
+    loadedBooks: books.size,
+    subscribedPairs: readySymbols.length,
+    readySymbols
+  }, 'USDC low-fee order books initialized');
 
   const calculator = new ArbitrageCalculator(takerFeesBySymbol);
 
-  // === Order Execution Service ===
   const executionConfig: OrderExecutionConfig = {
     orderSizeBase: 0.00238,
     minProfitUsdt: 0.50,
@@ -439,11 +212,7 @@ async function main(): Promise<void> {
     aggressivePriceRate: 0
   };
 
-  const executionService = new OrderExecutionService(
-    authenticatedClient,
-    books,
-    executionConfig
-  );
+  const executionService = new OrderExecutionService(authenticatedClient, books, executionConfig);
 
   const opportunityService = new OpportunityService(
     readyTriangles,
@@ -453,38 +222,27 @@ async function main(): Promise<void> {
     async (opportunity) => {
       const triangle = readyTriangles.find(t => t.id === opportunity.triangleId);
       await csvWriter.write(opportunity, triangle);
-
       logger.info({ triangle: opportunity.triangleId }, 'Opportunity found');
 
-      // Уведомление о возможности
       try {
         await telegramNotifier.sendOpportunity(opportunity);
       } catch (error) {
-        logger.error({ err: error }, 'Telegram opportunity notify failed');
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ err: error, errorMessage }, 'Telegram opportunity notify failed');
       }
 
-      // Исполнение ордера (если live trading)
       if (config.trading.liveTrading) {
         try {
-          // Уведомление о начале исполнения
           await telegramNotifier.sendOrderExecutionStart(opportunity);
-          
-          // Получить баланс ДО исполнения
           const balancesBefore = await authenticatedClient.getAccountBalances();
           await telegramNotifier.sendBalanceUpdate(balancesBefore, 'Balance BEFORE Execution');
-          
-          // Исполнить ордер
           const report = await executionService.executeArbitrage(opportunity);
-          
-          // Получить баланс ПОСЛЕ исполнения
           const balancesAfter = await authenticatedClient.getAccountBalances();
-          
-          // Уведомление об исполнении + баланс
           await telegramNotifier.sendOrderExecuted(report, balancesAfter);
-          
         } catch (error) {
-          logger.error({ err: error }, 'Order execution failed');
-          await telegramNotifier.send(`❌ **Execution Error:**\n${error.message}`);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error({ err: error, errorMessage }, 'Order execution failed');
+          await telegramNotifier.send(`❌ **Execution Error:**\n${errorMessage}`);
         }
       }
     },
@@ -495,21 +253,17 @@ async function main(): Promise<void> {
     readySymbols,
     async (depth) => {
       const book = books.get(depth.symbol);
-
-      if (!book) {
-        return;
-      }
-
+      if (!book) return;
       book.loadSnapshot({
         lastUpdateId: depth.toVersion,
         bids: depth.bids,
         asks: depth.asks
       });
-
       try {
         await opportunityService.evaluateAffected(depth.symbol);
       } catch (error) {
-        logger.error({ err: error }, 'Opportunity evaluation failed');
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ err: error, errorMessage }, 'Opportunity evaluation failed');
       }
     },
     () => logger.info('MEXC WebSocket connected'),
@@ -518,51 +272,35 @@ async function main(): Promise<void> {
 
   setInterval(() => {
     const now = Date.now();
-    const snapshots = [...books.values()].map((book) =>
-      book.getSnapshot(5)
-    );
-
+    const snapshots = [...books.values()].map((book) => book.getSnapshot(5));
     const readyBooks = snapshots.filter((snapshot) => snapshot.ready);
+    const staleBooks = readyBooks.filter((snapshot) => now - snapshot.updatedAt > STALE_BOOK_AFTER_MS);
+    const emptyBooks = snapshots.filter((snapshot) => snapshot.bids.length === 0 || snapshot.asks.length === 0);
 
-    const staleBooks = readyBooks.filter(
-      (snapshot) => now - snapshot.updatedAt > STALE_BOOK_AFTER_MS
-    );
-
-    const emptyBooks = snapshots.filter(
-      (snapshot) =>
-        snapshot.bids.length === 0 || snapshot.asks.length === 0
-    );
-
-    logger.info(
-      {
-        totalBooks: snapshots.length,
-        readyBooks: readyBooks.length,
-        staleBooks: staleBooks.length,
-        emptyBooks: emptyBooks.length,
-        sample: snapshots.slice(0, 5).map((snapshot) => ({
-          symbol: snapshot.symbol,
-          ready: snapshot.ready,
-          bid: snapshot.bids[0]?.price ?? null,
-          ask: snapshot.asks[0]?.price ?? null,
-          ageMs: now - snapshot.updatedAt,
-          lastUpdateId: snapshot.lastUpdateId
-        }))
-      },
-      'USDC low-fee order book health'
-    );
+    logger.info({
+      totalBooks: snapshots.length,
+      readyBooks: readyBooks.length,
+      staleBooks: staleBooks.length,
+      emptyBooks: emptyBooks.length,
+      sample: snapshots.slice(0, 5).map((snapshot) => ({
+        symbol: snapshot.symbol,
+        ready: snapshot.ready,
+        bid: snapshot.bids[0]?.price ?? null,
+        ask: snapshot.asks[0]?.price ?? null,
+        ageMs: now - snapshot.updatedAt,
+        lastUpdateId: snapshot.lastUpdateId
+      }))
+    }, 'USDC low-fee order book health');
   }, HEALTH_CHECK_INTERVAL_MS);
 
   await ws.connect();
 
   const shutdown = async (): Promise<void> => {
     logger.info('Shutdown started');
-
-    void telegramNotifier
-      .send('🛑 Arbitrage scanner stopped')
-      .catch((error) => {
-        logger.warn({ err: error }, 'Failed to send shutdown Telegram message');
-      });
-
+    void telegramNotifier.send('🛑 Arbitrage scanner stopped').catch((error) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn({ err: error, errorMessage }, 'Failed to send shutdown Telegram message');
+    });
     ws.stop();
     process.exit(0);
   };
@@ -572,6 +310,7 @@ async function main(): Promise<void> {
 }
 
 main().catch(async (error) => {
-  logger.fatal({ err: error }, 'Application failed to start');
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  logger.fatal({ err: error, errorMessage }, 'Application failed to start');
   process.exit(1);
 });
