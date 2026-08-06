@@ -1,6 +1,6 @@
 import { MexcAuthenticatedClient } from '../mexc/MexcAuthenticatedClient.js';
 import { OrderBook } from '../domain/orderBook.js';
-import { ArbitrageOpportunity } from '../domain/types.js';
+import { Opportunity } from '../domain/types.js';
 
 export interface OrderExecutionConfig {
   orderSizeBase: number;
@@ -24,7 +24,7 @@ export interface OrderResult {
 }
 
 export interface ExecutionReport {
-  opportunity: ArbitrageOpportunity;
+  opportunity: Opportunity;
   orders: OrderResult[];
   totalProfitUsdt: number;
   totalFeesUsdt: number;
@@ -69,7 +69,7 @@ export class OrderExecutionService {
     return snapshot.asks[0].price;
   }
 
-  async executeArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionReport> {
+  async executeArbitrage(opportunity: Opportunity): Promise<ExecutionReport> {
     const startTime = Date.now();
     const orders: OrderResult[] = [];
 
@@ -77,16 +77,19 @@ export class OrderExecutionService {
       return { opportunity, orders: [], totalProfitUsdt: 0, totalFeesUsdt: 0, executionTimeMs: 0, status: 'cancelled' };
     }
 
-    if (opportunity.profitUsdt < this.config.minProfitUsdt) {
+    // Конвертируем profit из startAsset в USDT (предполагаем что startAsset = USDC ≈ USDT)
+    const profitUsdt = opportunity.expectedProfit;
+
+    if (profitUsdt < this.config.minProfitUsdt) {
       return { opportunity, orders: [], totalProfitUsdt: 0, totalFeesUsdt: 0, executionTimeMs: 0, status: 'cancelled' };
     }
 
-    console.log(`[EXEC] Starting arbitrage: ${opportunity.triangle.base}→${opportunity.triangle.quote}→${opportunity.triangle.intermediate}`);
-    console.log(`[EXEC] Expected profit: $${opportunity.profitUsdt.toFixed(2)}`);
+    console.log(`[EXEC] Starting arbitrage: ${opportunity.triangleId}`);
+    console.log(`[EXEC] Expected profit: $${profitUsdt.toFixed(2)}`);
     console.log(`[EXEC] Order type: ${this.config.useMarketOrders ? 'MARKET' : 'LIMIT'}`);
 
     try {
-      const order1 = await this.executeStep1(opportunity.triangle, opportunity);
+      const order1 = await this.executeStep1(opportunity);
       orders.push(order1);
 
       if (!order1.success) {
@@ -94,22 +97,22 @@ export class OrderExecutionService {
         return this.createReport(opportunity, orders, startTime, 'failed');
       }
 
-      const order2 = await this.executeStep2(opportunity.triangle, opportunity, order1);
+      const order2 = await this.executeStep2(opportunity, order1);
       orders.push(order2);
 
       if (!order2.success) {
         console.error(`[EXEC] Step 2 failed: ${order2.error}`);
-        await this.attemptCancel(order1.orderId!, opportunity.triangle);
+        await this.attemptCancel(order1.orderId!, opportunity.triangleId);
         return this.createReport(opportunity, orders, startTime, 'partial');
       }
 
-      const order3 = await this.executeStep3(opportunity.triangle, opportunity, order2);
+      const order3 = await this.executeStep3(opportunity, order2);
       orders.push(order3);
 
       if (!order3.success) {
         console.error(`[EXEC] Step 3 failed: ${order3.error}`);
-        await this.attemptCancel(order1.orderId!, opportunity.triangle);
-        await this.attemptCancel(order2.orderId!, opportunity.triangle);
+        await this.attemptCancel(order1.orderId!, opportunity.triangleId);
+        await this.attemptCancel(order2.orderId!, opportunity.triangleId);
         return this.createReport(opportunity, orders, startTime, 'partial');
       }
 
@@ -121,27 +124,31 @@ export class OrderExecutionService {
     }
   }
 
-  private async executeStep1(triangle: any, opportunity: ArbitrageOpportunity): Promise<OrderResult> {
-    const symbol = `${triangle.base}_${triangle.quote}`;
-    const side: 'SELL' | 'BUY' = 'SELL';
-    console.log(`[STEP1] ${side} ${symbol}`);
-    return this.placeOrder(symbol, side, this.config.orderSizeBase);
+  private async executeStep1(opportunity: Opportunity, prevResult?: OrderResult): Promise<OrderResult> {
+    const leg = opportunity.legs[0];
+    const symbol = leg.symbol;
+    const side = leg.side;
+    const quantity = opportunity.startAmount;
+    console.log(`[STEP1] ${side} ${symbol}, size: ${quantity}`);
+    return this.placeOrder(symbol, side, quantity);
   }
 
-  private async executeStep2(triangle: any, opportunity: ArbitrageOpportunity, step1Result: OrderResult): Promise<OrderResult> {
-    const symbol = `${triangle.intermediate}_${triangle.quote}`;
-    const side: 'BUY' | 'SELL' = 'BUY';
-    const orderSize = step1Result.filledQuantity || this.config.orderSizeBase;
-    console.log(`[STEP2] ${side} ${symbol}, size: ${orderSize}`);
-    return this.placeOrder(symbol, side, orderSize);
+  private async executeStep2(opportunity: Opportunity, prevResult: OrderResult): Promise<OrderResult> {
+    const leg = opportunity.legs[1];
+    const symbol = leg.symbol;
+    const side = leg.side;
+    const quantity = prevResult.filledQuantity || leg.outputAmount;
+    console.log(`[STEP2] ${side} ${symbol}, size: ${quantity}`);
+    return this.placeOrder(symbol, side, quantity);
   }
 
-  private async executeStep3(triangle: any, opportunity: ArbitrageOpportunity, step2Result: OrderResult): Promise<OrderResult> {
-    const symbol = `${triangle.base}_${triangle.intermediate}`;
-    const side: 'BUY' | 'SELL' = 'BUY';
-    const orderSize = step2Result.filledQuantity || this.config.orderSizeBase;
-    console.log(`[STEP3] ${side} ${symbol}, size: ${orderSize}`);
-    return this.placeOrder(symbol, side, orderSize);
+  private async executeStep3(opportunity: Opportunity, prevResult: OrderResult): Promise<OrderResult> {
+    const leg = opportunity.legs[2];
+    const symbol = leg.symbol;
+    const side = leg.side;
+    const quantity = prevResult.filledQuantity || leg.outputAmount;
+    console.log(`[STEP3] ${side} ${symbol}, size: ${quantity}`);
+    return this.placeOrder(symbol, side, quantity);
   }
 
   private async placeOrder(symbol: string, side: 'BUY' | 'SELL', quantity: number): Promise<OrderResult> {
@@ -255,7 +262,7 @@ export class OrderExecutionService {
   }
 
   private createReport(
-    opportunity: ArbitrageOpportunity,
+    opportunity: Opportunity,
     orders: OrderResult[],
     startTime: number,
     status: 'executed' | 'partial' | 'failed' | 'cancelled'
@@ -263,8 +270,8 @@ export class OrderExecutionService {
     return {
       opportunity,
       orders,
-      totalProfitUsdt: 0,
-      totalFeesUsdt: 0,
+      totalProfitUsdt: opportunity.expectedProfit,
+      totalFeesUsdt: opportunity.totalFeeInStartAsset,
       executionTimeMs: Date.now() - startTime,
       status
     };
