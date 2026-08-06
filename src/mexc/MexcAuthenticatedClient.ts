@@ -63,7 +63,7 @@ export class MexcAuthenticatedClient {
 
     const signature = this.signRequest(params);
 
-    const url = `${config.mexc.restUrl}/api/v3/account/tradeFee?symbol=${symbol.toUpperCase()}&timestamp=${timestamp}&recvWindow=5000&signature=${signature}`;
+    const url = `${config.mexc.restUrl}/api/v3/tradeFee?symbol=${symbol.toUpperCase()}&timestamp=${timestamp}&recvWindow=5000&signature=${signature}`;
 
     const response = await fetch(url, {
       method: 'GET',
@@ -82,8 +82,8 @@ export class MexcAuthenticatedClient {
     
     return {
       symbol: symbol.toUpperCase(),
-      makerFeeRate: parseFloat(data.makerFeeRate || config.trading.takerFeeRate),
-      takerFeeRate: parseFloat(data.takerFeeRate || config.trading.takerFeeRate)
+      makerFeeRate: parseFloat(data.data?.makerCommission || config.trading.takerFeeRate),
+      takerFeeRate: parseFloat(data.data?.takerCommission || config.trading.takerFeeRate)
     };
   }
 
