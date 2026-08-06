@@ -1,5 +1,5 @@
 import { MexcAuthenticatedClient } from '../mexc/MexcAuthenticatedClient.js';
-import { OrderBookManager } from '../domain/orderBook.js';
+import { OrderBook } from '../domain/orderBook.js';
 import { ArbitrageOpportunity } from '../domain/types.js';
 
 export interface OrderExecutionConfig {
@@ -34,7 +34,7 @@ export interface ExecutionReport {
 
 export class OrderExecutionService {
   private client: MexcAuthenticatedClient;
-  private orderBook: OrderBookManager;
+  private orderBooks: Map<string, OrderBook>;
   private config: OrderExecutionConfig;
   private activeOrders: Map<string, {
     orderId: string;
@@ -45,12 +45,28 @@ export class OrderExecutionService {
 
   constructor(
     client: MexcAuthenticatedClient,
-    orderBook: OrderBookManager,
+    orderBooks: Map<string, OrderBook>,
     config: OrderExecutionConfig
   ) {
     this.client = client;
-    this.orderBook = orderBook;
+    this.orderBooks = orderBooks;
     this.config = config;
+  }
+
+  private getBestBid(symbol: string): number {
+    const book = this.orderBooks.get(symbol);
+    if (!book) throw new Error(`Order book not found for ${symbol}`);
+    const snapshot = book.getSnapshot(5);
+    if (snapshot.bids.length === 0) throw new Error(`No bids for ${symbol}`);
+    return snapshot.bids[0].price;
+  }
+
+  private getBestAsk(symbol: string): number {
+    const book = this.orderBooks.get(symbol);
+    if (!book) throw new Error(`Order book not found for ${symbol}`);
+    const snapshot = book.getSnapshot(5);
+    if (snapshot.asks.length === 0) throw new Error(`No asks for ${symbol}`);
+    return snapshot.asks[0].price;
   }
 
   async executeArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionReport> {
@@ -136,8 +152,8 @@ export class OrderExecutionService {
 
         if (!this.config.useMarketOrders) {
           price = side === 'SELL'
-            ? this.orderBook.getBestBid(symbol) * (1 - this.config.aggressivePriceRate)
-            : this.orderBook.getBestAsk(symbol) * (1 + this.config.aggressivePriceRate);
+            ? this.getBestBid(symbol) * (1 - this.config.aggressivePriceRate)
+            : this.getBestAsk(symbol) * (1 + this.config.aggressivePriceRate);
 
           if (!price || price <= 0) {
             throw new Error(`Invalid price for ${symbol}: ${price}`);
