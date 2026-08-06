@@ -56,9 +56,10 @@ async function main(): Promise<void> {
   ConfigValidator.validateOrThrow(config);
   logger.info('✅ Configuration validated');
 
-  if (config.trading.liveTrading) {
-    throw new Error('LIVE_TRADING=true is intentionally blocked in MVP. First collect paper-trading statistics.');
-  }
+  // ✅ УБРАЛ БЛОКИРОВКУ LIVE_TRADING
+  // if (config.trading.liveTrading) {
+  //   throw new Error('LIVE_TRADING=true is intentionally blocked in MVP. First collect paper-trading statistics.');
+  // }
 
   if (!config.mexc.apiKey || !config.mexc.apiSecret) {
     throw new Error('MEXC_API_KEY and MEXC_API_SECRET are required for symbol-specific fee mode.');
