@@ -38,15 +38,20 @@ export class TriangleBuilder {
             third.leg
           ];
 
-          const id = `direct:${legs.map((leg) => `${leg.symbol}:${leg.side}`).join('|')}`;
+          // === ИСПРАВЛЕНИЕ: Уникальный ключ без префикса ===
+          const uniqueKey = legs.map((leg) => `${leg.symbol}:${leg.side}`).join('|');
+          const id = `direct:${uniqueKey}`;
 
-          triangles.set(id, {
-            id,
-            startAsset,
-            middleAsset1: first.toAsset,
-            middleAsset2: second.toAsset,
-            legs
-          });
+          // Проверяем, нет ли уже такого треугольника
+          if (!triangles.has(uniqueKey)) {
+            triangles.set(uniqueKey, {
+              id,
+              startAsset,
+              middleAsset1: first.toAsset,
+              middleAsset2: second.toAsset,
+              legs
+            });
+          }
         }
       }
     }
@@ -80,17 +85,23 @@ export class TriangleBuilder {
               returnEdge.leg     // X → startAsset (SOL → USDC)
             ];
 
-            const id = `cross:${crossAsset}:${legs.map((leg) => `${leg.symbol}:${leg.side}`).join('|')}`;
-
-            triangles.set(id, {
-              id,
-              startAsset,
-              middleAsset1: crossAsset,
-              middleAsset2: middleEdge.toAsset,
-              legs,
-              isCrossRoute: true,
-              crossAsset
-            });
+            // === ИСПРАВЛЕНИЕ: Уникальный ключ без префикса ===
+            const uniqueKey = legs.map((leg) => `${leg.symbol}:${leg.side}`).join('|');
+            
+            // Проверяем, нет ли уже такого треугольника (direct или cross)
+            if (!triangles.has(uniqueKey)) {
+              const id = `cross:${crossAsset}:${uniqueKey}`;
+              
+              triangles.set(uniqueKey, {
+                id,
+                startAsset,
+                middleAsset1: crossAsset,
+                middleAsset2: middleEdge.toAsset,
+                legs,
+                isCrossRoute: true,
+                crossAsset
+              });
+            }
           }
         }
       }
