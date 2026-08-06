@@ -1,5 +1,6 @@
 import pino from 'pino';
 import { config } from './config.js';
+import { ConfigValidator } from './utils/ConfigValidator.js';
 import { OrderBook } from './domain/orderBook.js';
 import { ExchangeInfoLoader } from './mexc/ExchangeInfoLoader.js';
 import { MexcAuthenticatedClient } from './mexc/MexcAuthenticatedClient.js';
@@ -193,6 +194,10 @@ const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main(): Promise<void> {
+  // === ВАЛИДАЦИЯ КОНФИГУРАЦИИ ===
+  ConfigValidator.validateOrThrow(config);
+  logger.info('✅ Configuration validated');
+
   if (config.trading.liveTrading) {
     throw new Error(
       'LIVE_TRADING=true is intentionally blocked in MVP. First collect paper-trading statistics.'
@@ -477,7 +482,7 @@ async function main(): Promise<void> {
         );
       }
     },
-    csvBestRouteWriter // НОВЫЙ параметр
+    csvBestRouteWriter
   );
 
   const ws = new MexcPublicWs(
