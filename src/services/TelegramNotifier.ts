@@ -4,6 +4,22 @@ import type { Opportunity } from '../domain/types.js';
 
 const logger = pino({ level: 'info' });
 
+export interface ExecutionReport {
+  opportunity: any;
+  orders: Array<{
+    success: boolean;
+    orderId?: string;
+    error?: string;
+    filledQuantity?: number;
+    executedPrice?: number;
+    timestamp: number;
+  }>;
+  totalProfitUsdt: number;
+  totalFeesUsdt: number;
+  executionTimeMs: number;
+  status: 'executed' | 'partial' | 'failed' | 'cancelled';
+}
+
 export class TelegramNotifier {
   private readonly enabled: boolean;
   private readonly baseUrl: string | null;
@@ -38,7 +54,7 @@ export class TelegramNotifier {
       .join('\n\n');
 
     const text = [
-      'Arbitrage opportunity',
+      '📈 Arbitrage Opportunity',
       '',
       `Triangle: ${opportunity.triangleId}`,
       `Start: ${opportunity.startAmount} ${opportunity.startAsset}`,
@@ -49,6 +65,121 @@ export class TelegramNotifier {
       '',
       'Legs:',
       legs
+    ].join('\n');
+
+    await this.send(text);
+  }
+
+  async sendOrderExecutionStart(opportunity: any): Promise<void> {
+    const text = [
+      '🚀 Arbitrage Execution STARTED',
+      '',
+      `Triangle: ${opportunity.triangleId}`,
+      `Start Asset: ${opportunity.startAsset}`,
+      `Expected Profit: $${opportunity.expectedProfit.toFixed(2)}`,
+      `Gross ROI: ${(opportunity.grossRoiAfterFees * 100).toFixed(3)}%`,
+      '',
+      '⏳ Executing 3 orders...'
+    ].join('\n');
+
+    await this.send(text);
+  }
+
+  async sendOrderExecuted(report: ExecutionReport, balances: Array<{
+    asset: string;
+    free: number;
+    locked: number;
+    total: number;
+  }>): Promise<void> {
+    const emoji = report.status === 'executed' ? '✅' : 
+                  report.status === 'partial' ? '⚠️' : '❌';
+
+    const totalUsd = balances
+      .filter(b => ['USDC', 'USDT', 'USD1', 'FDUSD'].includes(b.asset))
+      .reduce((sum, b) => sum + b.total, 0);
+    
+    const totalBtc = balances
+      .filter(b => b.asset === 'BTC')
+      .reduce((sum, b) => sum + b.total, 0);
+
+    const ordersText = report.orders
+      .map((order, i) => 
+        [
+          `${i + 1}. ${order.success ? '✅' : '❌'} ${order.orderId || 'N/A'}`,
+          `   Filled: ${order.filledQuantity?.toFixed(6) || 0}`,
+          `   Price: $${order.executedPrice?.toFixed(2) || 0}`,
+          `   Error: ${order.error || 'None'}`
+        ].join('\n')
+      )
+      .join('\n\n');
+
+    const topAssets = balances
+      .slice(0, 5)
+      .map(b => `  ${b.asset}: ${b.total.toFixed(4)}`)
+      .join('\n');
+
+    const text = [
+      `${emoji} Arbitrage Execution ${report.status.toUpperCase()}`,
+      '',
+      `Triangle: ${report.opportunity.triangleId}`,
+      `Status: ${report.status}`,
+      `Execution Time: ${report.executionTimeMs}ms`,
+      '',
+      '💰 Profit:',
+      `Expected: $${report.opportunity.expectedProfit.toFixed(2)}`,
+      `Actual: $${report.totalProfitUsdt.toFixed(2)}`,
+      `Fees: $${report.totalFeesUsdt.toFixed(2)}`,
+      '',
+      '📋 Orders:',
+      ordersText,
+      '',
+      '💳 Current Balance:',
+      `Total USD: $${totalUsd.toFixed(2)}`,
+      `Total BTC: ${totalBtc.toFixed(6)}`,
+      '',
+      'Top Assets:',
+      topAssets,
+      '',
+      `⏰ Time: ${new Date().toISOString()}`
+    ].join('\n');
+
+    await this.send(text);
+  }
+
+  async sendBalanceUpdate(
+    balances: Array<{
+      asset: string;
+      free: number;
+      locked: number;
+      total: number;
+    }>,
+    title: string = 'Balance Update'
+  ): Promise<void> {
+    const totalUsd = balances
+      .filter(b => ['USDC', 'USDT', 'USD1', 'FDUSD'].includes(b.asset))
+      .reduce((sum, b) => sum + b.total, 0);
+    
+    const totalBtc = balances
+      .filter(b => b.asset === 'BTC')
+      .reduce((sum, b) => sum + b.total, 0);
+
+    const assetsText = balances
+      .filter(b => b.total > 0)
+      .map(b => 
+        `${b.asset}: ${b.free.toFixed(4)} (free) / ${b.locked.toFixed(4)} (locked) = ${b.total.toFixed(4)} total`
+      )
+      .join('\n');
+
+    const text = [
+      `💳 ${title}`,
+      '',
+      `Total USD: $${totalUsd.toFixed(2)}`,
+      `Total BTC: ${totalBtc.toFixed(6)}`,
+      '',
+      'Assets:',
+      assetsText,
+      '',
+      `⏰ Time: ${new Date().toISOString()}`
     ].join('\n');
 
     await this.send(text);
