@@ -37,7 +37,7 @@ async function testPlaceOrder() {
     symbol: 'BTCUSDT',
     side: 'BUY',
     type: 'MARKET',
-    quantity: '0.00001',
+    quantity: '0.00005',
     timestamp,
     recvWindow: 5000
   };
