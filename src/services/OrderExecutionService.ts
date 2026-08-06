@@ -1,6 +1,6 @@
 import { MexcAuthenticatedClient } from '../mexc/MexcAuthenticatedClient';
 import { OrderBookManager } from '../domain/orderBook';
-import { ArbitrageOpportunity, Triangle } from '../domain/types';
+import { ArbitrageOpportunity } from '../domain/types';
 
 export interface OrderExecutionConfig {
   // Размер ордера в базовой валюте (например, 0.001 BTC)
@@ -15,11 +15,17 @@ export interface OrderExecutionConfig {
   // Задержка между попытками (мс)
   retryDelayMs: number;
   
-  // Таймаут ордера (мс) — если не исполнился за это время, отменяем
+  // Таймаут ордера (мс) — для MARKET не используется
   orderTimeoutMs: number;
   
   // Разрешить торговлю
   enabled: boolean;
+  
+  // Использовать MARKET ордера (true) или LIMIT (false)
+  useMarketOrders: boolean;
+  
+  // Агрессивность цены для LIMIT (0.001 = 0.1%)
+  aggressivePriceRate: number;
 }
 
 export interface OrderResult {
@@ -29,6 +35,7 @@ export interface OrderResult {
   filledQuantity?: number;
   executedPrice?: number;
   timestamp: number;
+  isMarketOrder?: boolean;
 }
 
 export interface ExecutionReport {
@@ -42,6 +49,11 @@ export interface ExecutionReport {
 
 /**
  * OrderExecutionService — сервис для исполнения арбитражных сделок
+ * 
+ * Поддерживает:
+ * - MARKET ордера (для скорости)
+ * - LIMIT ордера (для контроля цены)
+ * - Уведомления в Telegram
  */
 export class OrderExecutionService {
   private client: MexcAuthenticatedClient;
@@ -65,6 +77,9 @@ export class OrderExecutionService {
     this.config = config;
   }
 
+  /**
+   * Главная функция исполнения арбитражной сделки
+   */
   async executeArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionReport> {
     const startTime = Date.now();
     const orders: OrderResult[] = [];
@@ -79,8 +94,10 @@ export class OrderExecutionService {
     
     console.log(`[EXEC] Starting arbitrage: ${opportunity.triangle.base}→${opportunity.triangle.quote}→${opportunity.triangle.intermediate}`);
     console.log(`[EXEC] Expected profit: $${opportunity.profitUsdt.toFixed(2)}`);
+    console.log(`[EXEC] Order type: ${this.config.useMarketOrders ? 'MARKET' : 'LIMIT'}`);
     
     try {
+      // STEP 1
       const order1 = await this.executeStep1(opportunity.triangle, opportunity);
       orders.push(order1);
       
@@ -89,6 +106,7 @@ export class OrderExecutionService {
         return this.createReport(opportunity, orders, startTime, 'failed');
       }
       
+      // STEP 2
       const order2 = await this.executeStep2(opportunity.triangle, opportunity, order1);
       orders.push(order2);
       
@@ -98,6 +116,7 @@ export class OrderExecutionService {
         return this.createReport(opportunity, orders, startTime, 'partial');
       }
       
+      // STEP 3
       const order3 = await this.executeStep3(opportunity.triangle, opportunity, order2);
       orders.push(order3);
       
@@ -116,51 +135,74 @@ export class OrderExecutionService {
     }
   }
 
-  private async executeStep1(triangle: Triangle, opportunity: ArbitrageOpportunity): Promise<OrderResult> {
+  private async executeStep1(triangle: any, opportunity: ArbitrageOpportunity): Promise<OrderResult> {
     const symbol = `${triangle.base}_${triangle.quote}`;
     const side: 'SELL' | 'BUY' = 'SELL';
     console.log(`[STEP1] ${side} ${symbol}`);
-    return this.placeOrderWithRetry(symbol, side, this.config.orderSizeBase);
+    return this.placeOrder(symbol, side, this.config.orderSizeBase);
   }
 
-  private async executeStep2(triangle: Triangle, opportunity: ArbitrageOpportunity, step1Result: OrderResult): Promise<OrderResult> {
+  private async executeStep2(triangle: any, opportunity: ArbitrageOpportunity, step1Result: OrderResult): Promise<OrderResult> {
     const symbol = `${triangle.intermediate}_${triangle.quote}`;
     const side: 'BUY' | 'SELL' = 'BUY';
     const orderSize = step1Result.filledQuantity || this.config.orderSizeBase;
     console.log(`[STEP2] ${side} ${symbol}, size: ${orderSize}`);
-    return this.placeOrderWithRetry(symbol, side, orderSize);
+    return this.placeOrder(symbol, side, orderSize);
   }
 
-  private async executeStep3(triangle: Triangle, opportunity: ArbitrageOpportunity, step2Result: OrderResult): Promise<OrderResult> {
+  private async executeStep3(triangle: any, opportunity: ArbitrageOpportunity, step2Result: OrderResult): Promise<OrderResult> {
     const symbol = `${triangle.base}_${triangle.intermediate}`;
     const side: 'BUY' | 'SELL' = 'BUY';
     const orderSize = step2Result.filledQuantity || this.config.orderSizeBase;
     console.log(`[STEP3] ${side} ${symbol}, size: ${orderSize}`);
-    return this.placeOrderWithRetry(symbol, side, orderSize);
+    return this.placeOrder(symbol, side, orderSize);
   }
 
-  private async placeOrderWithRetry(symbol: string, side: 'BUY' | 'SELL', quantity: number): Promise<OrderResult> {
+  /**
+   * Размещение ордера (MARKET или LIMIT)
+   */
+  private async placeOrder(symbol: string, side: 'BUY' | 'SELL', quantity: number): Promise<OrderResult> {
     for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
       try {
-        const price = side === 'SELL' 
-          ? this.orderBook.getBestBid(symbol)
-          : this.orderBook.getBestAsk(symbol);
+        let price: number | undefined = undefined;
+        let orderType: 'MARKET' | 'LIMIT' = this.config.useMarketOrders ? 'MARKET' : 'LIMIT';
         
-        if (!price || price <= 0) {
-          throw new Error(`Invalid price for ${symbol}: ${price}`);
+        // Для LIMIT ордера — агрессивная цена
+        if (!this.config.useMarketOrders) {
+          price = side === 'SELL' 
+            ? this.orderBook.getBestBid(symbol) * (1 - this.config.aggressivePriceRate)
+            : this.orderBook.getBestAsk(symbol) * (1 + this.config.aggressivePriceRate);
+          
+          if (!price || price <= 0) {
+            throw new Error(`Invalid price for ${symbol}: ${price}`);
+          }
         }
         
+        // Размещаем ордер
         const order = await this.client.placeOrder({
           symbol: symbol.toUpperCase(),
           side,
-          orderType: 'LIMIT',
-          price: price.toString(),
+          orderType,
+          price: price?.toString(),
           quantity: quantity.toString(),
-          timeInForce: 'GTC'
+          timeInForce: this.config.useMarketOrders ? undefined : 'GTC'
         });
         
-        console.log(`[ORDER] Placed: ${order.orderId} ${side} ${symbol} @ ${price} × ${quantity}`);
+        console.log(`[ORDER] Placed: ${order.orderId} ${orderType} ${side} ${symbol} @ ${price || 'MARKET'} × ${quantity}`);
         
+        // Для MARKET — возвращаем сразу
+        if (this.config.useMarketOrders) {
+          return {
+            success: true,
+            orderId: order.orderId,
+            filledQuantity: quantity,
+            executedPrice: price,
+            timestamp: Date.now(),
+            isMarketOrder: true
+          };
+        }
+        
+        // Для LIMIT — ждём исполнения
         this.activeOrders.set(order.orderId, {
           orderId: order.orderId,
           symbol,
@@ -264,12 +306,10 @@ export class OrderExecutionService {
 
   async cancelAllActiveOrders(): Promise<void> {
     console.log(`[EXEC] Cancelling ${this.activeOrders.size} active orders...`);
-    
     const promises = [];
     for (const [orderId, order] of this.activeOrders) {
       promises.push(this.attemptCancel(orderId, order.symbol));
     }
-    
     await Promise.all(promises);
     this.activeOrders.clear();
   }
