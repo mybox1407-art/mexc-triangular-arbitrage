@@ -226,11 +226,18 @@ async function main(): Promise<void> {
     'Starting USDC low-fee triangular arbitrage scanner with cross-routes'
   );
 
-  void telegramNotifier
-    .send('✅ Arbitrage scanner started')
-    .catch((error) => {
-      logger.warn({ err: error }, 'Failed to send startup Telegram message');
-    });
+  // Отправка баланса при старте
+  (async () => {
+    try {
+      await telegramNotifier.send('✅ Arbitrage scanner started');
+      
+      // Получить баланс и отправить
+      const balances = await authenticatedClient.getAccountBalances();
+      await telegramNotifier.sendBalanceUpdate(balances, 'Startup Balance');
+    } catch (error) {
+      logger.warn({ err: error }, 'Failed to send startup balance');
+    }
+  })();
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
 
