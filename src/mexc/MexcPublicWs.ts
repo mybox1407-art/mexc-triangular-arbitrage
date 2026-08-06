@@ -17,7 +17,8 @@ type WsConnection = {
 };
 
 const MAX_SUBSCRIPTIONS_PER_SOCKET = 30;
-const RECONNECT_DELAY_MS = 1_500;
+const INITIAL_RECONNECT_DELAY_MS = 1_500;
+const MAX_RECONNECT_DELAY_MS = 60_000;
 const PING_INTERVAL_MS = 20_000;
 const LIMIT_DEPTH_LEVELS = 5;
 
@@ -27,6 +28,7 @@ export class MexcPublicWs {
   private stopped = false;
   private receivedMessages = 0;
   private decodedDepthMessages = 0;
+  private reconnectAttempts = new Map<string, number>();
 
   constructor(
     private readonly symbols: string[],
@@ -63,11 +65,14 @@ export class MexcPublicWs {
 
   private open(symbols: string[]): void {
     const ws = new WebSocket(config.mexc.wsUrl);
+    const connectionKey = symbols.join(',');
     const connection: WsConnection = { ws, symbols };
 
     this.connections.push(connection);
 
     ws.on('open', () => {
+      this.reconnectAttempts.set(connectionKey, 0);
+      
       this.subscribeLimitDepth(connection);
       this.startPing(connection);
 
@@ -109,7 +114,22 @@ export class MexcPublicWs {
       this.onClose?.();
 
       if (!this.stopped) {
-        setTimeout(() => this.open(symbols), RECONNECT_DELAY_MS);
+        const attempts = this.reconnectAttempts.get(connectionKey) || 0;
+        const nextAttempts = attempts + 1;
+        this.reconnectAttempts.set(connectionKey, nextAttempts);
+        
+        const delay = Math.min(
+          INITIAL_RECONNECT_DELAY_MS * Math.pow(2, attempts),
+          MAX_RECONNECT_DELAY_MS
+        );
+        
+        console.log(JSON.stringify({
+          msg: 'MEXC WebSocket reconnect scheduled',
+          attempt: nextAttempts,
+          delayMs: delay
+        }));
+        
+        setTimeout(() => this.open(symbols), delay);
       }
     });
 
