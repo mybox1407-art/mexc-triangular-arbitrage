@@ -15,3 +15,9 @@ docker compose logs -f arbitrage-bot
 Сейчас увеличили количество пар и сделали 2 платные ноги
 
 Разобраться с дублированием direct и cross
+
+
+Тест API
+
+node test-api.js
+node test-order.js
