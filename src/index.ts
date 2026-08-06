@@ -32,7 +32,7 @@ const ALLOWED_ASSETS = new Set([
   'U2U', 'CTX', 'QNT', 'MANTRA', 'REZ', 'DYM', 'METIS', 'PENDLE', 'PIXEL',
   'PORTAL', 'ALT', 'MANTA', 'AEVO', 'ETHFI', 'ENA', 'SLERF', 'OMNI', 'REI',
   'XAI', 'METAFI', 'RATS', '1000SATS', 'SATS', 'DEGEN', 'ACE', 'NFP', 'AI',
-  'BABYDOGE', 'LEASH'
+  'BABYDOGE', 'LEASH', 'MX'
 ]);
 
 const MAX_TRIANGLES = Number.POSITIVE_INFINITY;
