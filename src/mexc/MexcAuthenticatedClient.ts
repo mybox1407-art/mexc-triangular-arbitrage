@@ -23,6 +23,12 @@ export interface OrderStatus {
   time: number;
 }
 
+export interface TradeFee {
+  symbol: string;
+  makerFeeRate: number;
+  takerFeeRate: number;
+}
+
 export class MexcAuthenticatedClient {
   private apiKey: string;
   private apiSecret: string;
@@ -45,6 +51,40 @@ export class MexcAuthenticatedClient {
       .createHmac('sha256', this.apiSecret)
       .update(queryString)
       .digest('hex');
+  }
+
+  async getTradeFee(symbol: string): Promise<TradeFee> {
+    const timestamp = Date.now();
+    const params = {
+      symbol: symbol.toUpperCase(),
+      timestamp,
+      recvWindow: 5000
+    };
+
+    const signature = this.signRequest(params);
+
+    const url = `${config.mexc.restUrl}/api/v3/account/tradeFee?symbol=${symbol.toUpperCase()}&timestamp=${timestamp}&recvWindow=5000&signature=${signature}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-MEXC-APIKEY': this.apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`HTTP ${response.status}: ${error}`);
+    }
+
+    const data = await response.json();
+    
+    return {
+      symbol: symbol.toUpperCase(),
+      makerFeeRate: parseFloat(data.makerFeeRate || config.trading.takerFeeRate),
+      takerFeeRate: parseFloat(data.takerFeeRate || config.trading.takerFeeRate)
+    };
   }
 
   async placeOrder(params: PlaceOrderParams): Promise<OrderStatus> {
