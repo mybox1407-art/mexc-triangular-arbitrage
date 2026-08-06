@@ -1,8 +1,26 @@
 import crypto from 'crypto';
-import { config } from './src/config.js';
 
-const apiKey = config.mexc.apiKey;
-const apiSecret = config.mexc.apiSecret;
+// Загрузить .env вручную
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Парсинг .env
+const envContent = readFileSync(join(__dirname, '.env'), 'utf-8');
+const env = {};
+envContent.split('\n').forEach(line => {
+  const [key, value] = line.split('=');
+  if (key && value) {
+    env[key.trim()] = value.trim();
+  }
+});
+
+const apiKey = env.MEXC_API_KEY;
+const apiSecret = env.MEXC_API_SECRET;
+const restUrl = env.MEXC_REST_URL || 'https://api.mexc.com';
 
 function signRequest(params) {
   const queryString = Object.entries(params)
@@ -20,7 +38,7 @@ async function testBalance() {
   const params = { timestamp };
   const signature = signRequest(params);
 
-  const url = `${config.mexc.restUrl}/api/v3/account?timestamp=${timestamp}&signature=${signature}`;
+  const url = `${restUrl}/api/v3/account?timestamp=${timestamp}&signature=${signature}`;
 
   console.log('URL:', url);
 
