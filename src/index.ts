@@ -14,6 +14,7 @@ import { OpportunityService } from './services/OpportunityService.js';
 import { PerformanceLogWriter } from './services/PerformanceLogWriter.js';
 import { TelegramNotifier } from './services/TelegramNotifier.js';
 import { TriangleBuilder } from './services/TriangleBuilder.js';
+import { OrderExecutionService, OrderExecutionConfig } from './services/OrderExecutionService.js';
 
 const ALLOWED_ASSETS = new Set([
   'USDC',
@@ -419,6 +420,24 @@ async function main(): Promise<void> {
 
   const calculator = new ArbitrageCalculator(takerFeesBySymbol);
 
+  // === Order Execution Service ===
+  const executionConfig: OrderExecutionConfig = {
+    orderSizeBase: 0.00238,
+    minProfitUsdt: 0.50,
+    maxRetries: 3,
+    retryDelayMs: 500,
+    orderTimeoutMs: 5000,
+    enabled: config.trading.liveTrading,
+    useMarketOrders: true,
+    aggressivePriceRate: 0
+  };
+
+  const executionService = new OrderExecutionService(
+    authenticatedClient,
+    books,
+    executionConfig
+  );
+
   const opportunityService = new OpportunityService(
     readyTriangles,
     books,
@@ -428,58 +447,38 @@ async function main(): Promise<void> {
       const triangle = readyTriangles.find(t => t.id === opportunity.triangleId);
       await csvWriter.write(opportunity, triangle);
 
-      logger.info(
-        {
-          triangle: opportunity.triangleId,
-          startAsset: opportunity.startAsset,
-          start: opportunity.startAmount,
-          final: opportunity.finalAmount,
-          grossRoiPct: Number(
-            (opportunity.grossRoiAfterFees * 100).toFixed(4)
-          ),
-          netRoiPct: Number((opportunity.netRoi * 100).toFixed(4)),
-          profit: opportunity.expectedProfit,
-          legs: opportunity.legs.map((leg) => ({
-            symbol: leg.symbol,
-            side: leg.side,
-            route: `${leg.fromAsset}->${leg.toAsset}`,
-            input: leg.inputAmount,
-            output: leg.outputAmount,
-            vwap: leg.vwap,
-            fee: leg.feePaidInOutput,
-            levelsUsed: leg.levelsUsed
-          }))
-        },
-        'USDC low-fee paper arbitrage opportunity'
-      );
+      logger.info({ triangle: opportunity.triangleId }, 'Opportunity found');
 
-      logger.info(
-        {
-          triangle: opportunity.triangleId,
-          grossRoiAfterFees: opportunity.grossRoiAfterFees,
-          netRoi: opportunity.netRoi,
-          profit: opportunity.expectedProfit
-        },
-        'Sending Telegram opportunity notification'
-      );
-
+      // Уведомление о возможности
       try {
         await telegramNotifier.sendOpportunity(opportunity);
-
-        logger.info(
-          {
-            triangle: opportunity.triangleId
-          },
-          'Telegram opportunity notification sent'
-        );
       } catch (error) {
-        logger.error(
-          {
-            err: error,
-            triangle: opportunity.triangleId
-          },
-          'Telegram notify failed'
-        );
+        logger.error({ err: error }, 'Telegram opportunity notify failed');
+      }
+
+      // Исполнение ордера (если live trading)
+      if (config.trading.liveTrading) {
+        try {
+          // Уведомление о начале исполнения
+          await telegramNotifier.sendOrderExecutionStart(opportunity);
+          
+          // Получить баланс ДО исполнения
+          const balancesBefore = await authenticatedClient.getAccountBalances();
+          await telegramNotifier.sendBalanceUpdate(balancesBefore, 'Balance BEFORE Execution');
+          
+          // Исполнить ордер
+          const report = await executionService.executeArbitrage(opportunity);
+          
+          // Получить баланс ПОСЛЕ исполнения
+          const balancesAfter = await authenticatedClient.getAccountBalances();
+          
+          // Уведомление об исполнении + баланс
+          await telegramNotifier.sendOrderExecuted(report, balancesAfter);
+          
+        } catch (error) {
+          logger.error({ err: error }, 'Order execution failed');
+          await telegramNotifier.send(`❌ **Execution Error:**\n${error.message}`);
+        }
       }
     },
     csvBestRouteWriter
