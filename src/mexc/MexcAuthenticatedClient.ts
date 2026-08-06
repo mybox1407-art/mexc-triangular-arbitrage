@@ -108,17 +108,19 @@ export class MexcAuthenticatedClient {
 
     const signature = this.signRequest(requestBody);
 
-    const url = `${config.mexc.restUrl}/api/v3/order`;
+    // Signature в query string
+    const queryString = Object.entries(requestBody)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&');
+
+    const url = `${config.mexc.restUrl}/api/v3/order?${queryString}&signature=${signature}`;
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'X-MEXC-APIKEY': this.apiKey,
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        ...requestBody,
-        signature
-      })
+      }
     });
 
     if (!response.ok) {
@@ -169,17 +171,18 @@ export class MexcAuthenticatedClient {
 
     const signature = this.signRequest(params);
 
-    const url = `${config.mexc.restUrl}/api/v3/order`;
+    const queryString = Object.entries(params)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&');
+
+    const url = `${config.mexc.restUrl}/api/v3/order?${queryString}&signature=${signature}`;
+
     const response = await fetch(url, {
       method: 'DELETE',
       headers: {
         'X-MEXC-APIKEY': this.apiKey,
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        ...params,
-        signature
-      })
+      }
     });
 
     if (!response.ok) {
