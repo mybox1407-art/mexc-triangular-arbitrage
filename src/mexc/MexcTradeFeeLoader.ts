@@ -25,54 +25,42 @@ export class MexcTradeFeeLoader {
   ) {}
 
   async loadTakerFees(symbols: string[]): Promise<Map<string, number>> {
-    const uniqueSymbols = [
-      ...new Set(symbols.map((symbol) => symbol.toUpperCase()))
-    ];
-
+    const uniqueSymbols = [...new Set(symbols.map((symbol) => symbol.toUpperCase()))];
     const fees = new Map<string, number>();
 
     for (const symbol of uniqueSymbols) {
       try {
         const fee = await this.client.getTradeFee(symbol);
-
         fees.set(symbol, fee.takerFeeRate);
-
-        this.logger.info(
-          {
-            symbol,
-            makerFeeRate: fee.makerFeeRate,
-            takerFeeRate: fee.takerFeeRate
-          },
-          'Loaded MEXC account trade fee'
-        );
+        this.logger.info({
+          symbol,
+          makerFeeRate: fee.makerFeeRate,
+          takerFeeRate: fee.takerFeeRate
+        }, 'Loaded MEXC account trade fee');
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
         if (isPermissionError(error)) {
-          this.logger.error(
-            {
-              err: error,
-              symbol,
-              fallbackTakerFeeRate: config.trading.takerFeeRate
-            },
-            'MEXC API key lacks SPOT_ACCOUNT_READ; using fallback fee for all symbols'
-          );
+          this.logger.error({
+            err: error,
+            symbol,
+            fallbackTakerFeeRate: config.trading.takerFeeRate,
+            errorMessage
+          }, 'MEXC API key lacks SPOT_ACCOUNT_READ; using fallback fee for all symbols');
 
           for (const remainingSymbol of uniqueSymbols) {
             fees.set(remainingSymbol, config.trading.takerFeeRate);
           }
-
           return fees;
         }
 
         fees.set(symbol, config.trading.takerFeeRate);
-
-        this.logger.warn(
-          {
-            err: error,
-            symbol,
-            fallbackTakerFeeRate: config.trading.takerFeeRate
-          },
-          'Could not load MEXC account fee; using fallback fee'
-        );
+        this.logger.warn({
+          err: error,
+          symbol,
+          fallbackTakerFeeRate: config.trading.takerFeeRate,
+          errorMessage
+        }, 'Could not load MEXC account fee; using fallback fee');
       }
 
       await sleep(REQUEST_DELAY_MS);
