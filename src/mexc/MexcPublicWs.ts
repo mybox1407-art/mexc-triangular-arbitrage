@@ -208,17 +208,17 @@ export class MexcPublicWs {
 
       this.decodedDepthMessages += 1;
 
-      if (this.decodedDepthMessages % 100 === 0) {
-        console.log(JSON.stringify({
-          msg: 'MEXC protobuf limit-depth snapshots decoded',
-          receivedMessages: this.receivedMessages,
-          decodedDepthMessages: this.decodedDepthMessages,
-          symbol: snapshot.symbol,
-          version: snapshot.version,
-          bids: snapshot.bids.length,
-          asks: snapshot.asks.length
-        }));
-      }
+      //if (this.decodedDepthMessages % 100 === 0) {
+      //  console.log(JSON.stringify({
+      //    msg: 'MEXC protobuf limit-depth snapshots decoded',
+      //    receivedMessages: this.receivedMessages,
+      //    decodedDepthMessages: this.decodedDepthMessages,
+      //    symbol: snapshot.symbol,
+      //    version: snapshot.version,
+      //    bids: snapshot.bids.length,
+      //    asks: snapshot.asks.length
+      //  }));
+      //}
 
       void Promise.resolve(
         this.onDepth({
