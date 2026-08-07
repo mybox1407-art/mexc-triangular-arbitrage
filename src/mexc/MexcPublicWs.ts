@@ -76,11 +76,11 @@ export class MexcPublicWs {
       this.subscribeLimitDepth(connection);
       this.startPing(connection);
 
-      //console.log(JSON.stringify({
-      //  msg: 'MEXC limit-depth WebSocket connection opened',
-      //  symbols: symbols.length,
-      //  sampleSymbols: symbols.slice(0, 5)
-      //}));
+      console.log(JSON.stringify({
+        msg: 'MEXC limit-depth WebSocket connection opened',
+        symbols: symbols.length,
+        sampleSymbols: symbols.slice(0, 5)
+      }));
 
       this.onOpen?.();
     });
