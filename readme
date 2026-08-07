@@ -1,3 +1,4 @@
+cd mexc-triangular-arbitrage
 docker compose down
 cd ~
 rm -rf mexc-triangular-arbitrage
