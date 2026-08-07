@@ -74,13 +74,18 @@ export class OrderExecutionService {
     const orders: OrderResult[] = [];
 
     if (!this.config.enabled) {
+      console.log(`[EXEC] CANCELLED: trading disabled`);
       return { opportunity, orders: [], totalProfitUsdt: 0, totalFeesUsdt: 0, executionTimeMs: 0, status: 'cancelled' };
     }
 
     // Конвертируем profit из startAsset в USDT (предполагаем что startAsset = USDC ≈ USDT)
     const profitUsdt = opportunity.expectedProfit;
 
+    // ✅ ДОБАВЛЕНО: логирование значений
+    console.log(`[EXEC] profitUsdt=${profitUsdt.toFixed(6)}, minProfitUsdt=${this.config.minProfitUsdt}`);
+
     if (profitUsdt < this.config.minProfitUsdt) {
+      console.log(`[EXEC] CANCELLED: profit ${profitUsdt.toFixed(4)} < minProfit ${this.config.minProfitUsdt}`);
       return { opportunity, orders: [], totalProfitUsdt: 0, totalFeesUsdt: 0, executionTimeMs: 0, status: 'cancelled' };
     }
 
