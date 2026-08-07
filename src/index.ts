@@ -38,7 +38,7 @@ const ALLOWED_ASSETS = new Set([
 const MAX_TRIANGLES = Number.POSITIVE_INFINITY;
 const MAX_PAID_LEGS = 3;
 const SNAPSHOT_DELAY_MS = 300;
-const HEALTH_CHECK_INTERVAL_MS = 10_000;
+const HEALTH_CHECK_INTERVAL_MS = 120_000;
 const STALE_BOOK_AFTER_MS = 5_000;
 const ZERO_FEE_EPSILON = 1e-12;
 
@@ -278,20 +278,20 @@ async function main(): Promise<void> {
     const staleBooks = readyBooks.filter((snapshot) => now - snapshot.updatedAt > STALE_BOOK_AFTER_MS);
     const emptyBooks = snapshots.filter((snapshot) => snapshot.bids.length === 0 || snapshot.asks.length === 0);
 
-    //logger.info({
-    //  totalBooks: snapshots.length,
-    //  readyBooks: readyBooks.length,
-    //  staleBooks: staleBooks.length,
-    //  emptyBooks: emptyBooks.length,
-    //  sample: snapshots.slice(0, 5).map((snapshot) => ({
-    //    symbol: snapshot.symbol,
-    //    ready: snapshot.ready,
-    //    bid: snapshot.bids[0]?.price ?? null,
-    //    ask: snapshot.asks[0]?.price ?? null,
-    //    ageMs: now - snapshot.updatedAt,
-    //    lastUpdateId: snapshot.lastUpdateId
-    //  }))
-    //}, 'USDC low-fee order book health');
+    logger.info({
+      totalBooks: snapshots.length,
+      readyBooks: readyBooks.length,
+      staleBooks: staleBooks.length,
+      emptyBooks: emptyBooks.length,
+      sample: snapshots.slice(0, 5).map((snapshot) => ({
+        symbol: snapshot.symbol,
+        ready: snapshot.ready,
+        bid: snapshot.bids[0]?.price ?? null,
+        ask: snapshot.asks[0]?.price ?? null,
+        ageMs: now - snapshot.updatedAt,
+        lastUpdateId: snapshot.lastUpdateId
+      }))
+    }, 'USDC low-fee order book health');
   }, HEALTH_CHECK_INTERVAL_MS);
 
   await ws.connect();
