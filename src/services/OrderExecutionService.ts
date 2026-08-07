@@ -119,6 +119,7 @@ export class OrderExecutionService {
         return this.createReport(opportunity, orders, startTime, 'partial');
       }
 
+      console.log(`[EXEC] Arbitrage completed successfully: ${opportunity.triangleId}`);
       return this.createReport(opportunity, orders, startTime, 'executed');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -141,7 +142,7 @@ export class OrderExecutionService {
     const symbol = leg.symbol;
     const side = leg.side;
     const quantity = prevResult.filledQuantity || leg.outputAmount;
-    console.log(`[STEP2] ${side} ${symbol}, size: ${quantity}`);
+    console.log(`[STEP2] ${side} ${symbol}, size: ${quantity} (from Step1 filled: ${prevResult.filledQuantity})`);
     return this.placeOrder(symbol, side, quantity);
   }
 
@@ -150,7 +151,7 @@ export class OrderExecutionService {
     const symbol = leg.symbol;
     const side = leg.side;
     const quantity = prevResult.filledQuantity || leg.outputAmount;
-    console.log(`[STEP3] ${side} ${symbol}, size: ${quantity}`);
+    console.log(`[STEP3] ${side} ${symbol}, size: ${quantity} (from Step2 filled: ${prevResult.filledQuantity})`);
     return this.placeOrder(symbol, side, quantity);
   }
 
@@ -214,6 +215,8 @@ export class OrderExecutionService {
       try {
         const status = await this.client.getOrderStatus(orderId, symbol);
 
+        console.log(`[STATUS] ${orderId}: ${status.status} | executedQty=${status.executedQty} | avgPrice=${status.avgPrice} | cummativeQuoteQty=${status.cummativeQuoteQty}`);
+
         if (status.status === 'FILLED') {
           console.log(`[ORDER] Filled: ${orderId} | qty=${status.executedQty} @ ${status.avgPrice}`);
           return {
@@ -226,7 +229,12 @@ export class OrderExecutionService {
         }
 
         if (status.status === 'CANCELED' || status.status === 'REJECTED') {
+          console.error(`[ORDER] ${orderId} ${status.status}`);
           return { success: false, orderId, error: `Order ${status.status}`, timestamp: Date.now() };
+        }
+
+        if (status.status === 'PARTIALLY_FILLED') {
+          console.warn(`[ORDER] ${orderId} PARTIALLY_FILLED | executedQty=${status.executedQty} | avgPrice=${status.avgPrice}`);
         }
 
         await this.sleep(100);
@@ -237,7 +245,7 @@ export class OrderExecutionService {
       }
     }
 
-    console.warn(`[TIMEOUT] Cancelling order ${orderId}`);
+    console.warn(`[TIMEOUT] Cancelling order ${orderId} after ${Date.now() - startTime}ms`);
     await this.attemptCancel(orderId, symbol);
 
     return { success: false, orderId, error: 'Order timeout', timestamp: Date.now() };
