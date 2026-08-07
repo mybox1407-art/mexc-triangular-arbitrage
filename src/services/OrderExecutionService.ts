@@ -78,10 +78,8 @@ export class OrderExecutionService {
       return { opportunity, orders: [], totalProfitUsdt: 0, totalFeesUsdt: 0, executionTimeMs: 0, status: 'cancelled' };
     }
 
-    // Конвертируем profit из startAsset в USDT (предполагаем что startAsset = USDC ≈ USDT)
     const profitUsdt = opportunity.expectedProfit;
 
-    // ✅ ДОБАВЛЕНО: логирование значений
     console.log(`[EXEC] profitUsdt=${profitUsdt.toFixed(6)}, minProfitUsdt=${this.config.minProfitUsdt}`);
 
     if (profitUsdt < this.config.minProfitUsdt) {
@@ -183,17 +181,6 @@ export class OrderExecutionService {
 
         console.log(`[ORDER] Placed: ${order.orderId} ${orderType} ${side} ${symbol} @ ${price || 'MARKET'} × ${quantity}`);
 
-        if (this.config.useMarketOrders) {
-          return {
-            success: true,
-            orderId: order.orderId,
-            filledQuantity: quantity,
-            executedPrice: price,
-            timestamp: Date.now(),
-            isMarketOrder: true
-          };
-        }
-
         this.activeOrders.set(order.orderId, {
           orderId: order.orderId,
           symbol,
@@ -228,7 +215,7 @@ export class OrderExecutionService {
         const status = await this.client.getOrderStatus(orderId, symbol);
 
         if (status.status === 'FILLED') {
-          console.log(`[ORDER] Filled: ${orderId}`);
+          console.log(`[ORDER] Filled: ${orderId} | qty=${status.executedQty} @ ${status.avgPrice}`);
           return {
             success: true,
             orderId,
