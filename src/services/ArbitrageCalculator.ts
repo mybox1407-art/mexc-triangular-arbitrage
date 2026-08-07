@@ -132,18 +132,18 @@ export class ArbitrageCalculator {
     );
     const levelsPerLeg = simulatedLegs.map((leg) => leg.levelsUsed);
 
-    logger.info(
-      {
-        triangleId: triangle.id,
-        maxLevelsUsed,
-        levelsPerLeg,
-        grossRoiBeforeFees,
-        grossRoiAfterFees,
-        netRoi,
-        totalFeeRate
-      },
-      'Simulated triangle'
-    );
+    //logger.info(
+    //  {
+    //    triangleId: triangle.id,
+    //    maxLevelsUsed,
+    //    levelsPerLeg,
+    //    grossRoiBeforeFees,
+    //    grossRoiAfterFees,
+    //    netRoi,
+    //    totalFeeRate
+    //  },
+    //  'Simulated triangle'
+    //);
 
     return {
       triangleId: triangle.id,
