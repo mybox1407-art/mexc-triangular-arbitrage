@@ -5,8 +5,6 @@ import {
 import { OrderBook } from '../domain/orderBook.js';
 import { Opportunity } from '../domain/types.js';
 
-type Leg = Opportunity['legs'][number];
-
 interface SymbolFilter {
   stepSize: number;
   tickSize: number;
@@ -110,11 +108,8 @@ export class OrderExecutionService {
     };
   }
 
-  private getBestBid(
-    symbol: string
-  ): number {
-    const book =
-      this.orderBooks.get(symbol);
+  private getBestBid(symbol: string): number {
+    const book = this.orderBooks.get(symbol);
 
     if (!book) {
       throw new Error(
@@ -122,8 +117,7 @@ export class OrderExecutionService {
       );
     }
 
-    const snapshot =
-      book.getSnapshot(5);
+    const snapshot = book.getSnapshot(5);
 
     if (snapshot.bids.length === 0) {
       throw new Error(
@@ -134,11 +128,8 @@ export class OrderExecutionService {
     return snapshot.bids[0].price;
   }
 
-  private getBestAsk(
-    symbol: string
-  ): number {
-    const book =
-      this.orderBooks.get(symbol);
+  private getBestAsk(symbol: string): number {
+    const book = this.orderBooks.get(symbol);
 
     if (!book) {
       throw new Error(
@@ -146,8 +137,7 @@ export class OrderExecutionService {
       );
     }
 
-    const snapshot =
-      book.getSnapshot(5);
+    const snapshot = book.getSnapshot(5);
 
     if (snapshot.asks.length === 0) {
       throw new Error(
@@ -235,12 +225,11 @@ export class OrderExecutionService {
     );
 
     try {
-      const order1 =
-        await this.executeLeg(
-          0,
-          opportunity,
-          opportunity.startAmount
-        );
+      const order1 = await this.executeLeg(
+        0,
+        opportunity,
+        opportunity.startAmount
+      );
 
       orders.push(order1);
 
@@ -258,17 +247,13 @@ export class OrderExecutionService {
       }
 
       const input2 =
-        this.resolveNextInput(
-          order1,
-          'step1'
-        );
+        this.resolveNextInput(order1, 'step1');
 
-      const order2 =
-        await this.executeLeg(
-          1,
-          opportunity,
-          input2
-        );
+      const order2 = await this.executeLeg(
+        1,
+        opportunity,
+        input2
+      );
 
       orders.push(order2);
 
@@ -291,17 +276,13 @@ export class OrderExecutionService {
       }
 
       const input3 =
-        this.resolveNextInput(
-          order2,
-          'step2'
-        );
+        this.resolveNextInput(order2, 'step2');
 
-      const order3 =
-        await this.executeLeg(
-          2,
-          opportunity,
-          input3
-        );
+      const order3 = await this.executeLeg(
+        2,
+        opportunity,
+        input3
+      );
 
       orders.push(order3);
 
@@ -380,6 +361,7 @@ export class OrderExecutionService {
       result.receivedQuantity;
 
     if (
+      received === undefined ||
       !Number.isFinite(received) ||
       received <= 0
     ) {
@@ -408,8 +390,7 @@ export class OrderExecutionService {
       };
     }
 
-    const step =
-      legIndex + 1;
+    const step = legIndex + 1;
 
     if (
       !Number.isFinite(inputAmount) ||
@@ -433,7 +414,7 @@ export class OrderExecutionService {
         success: false,
         error:
           `BUY quote amount ${inputAmount} ` +
-          `is below minimum notional`,
+          'is below minimum notional',
         timestamp: Date.now()
       };
     }
@@ -457,7 +438,10 @@ export class OrderExecutionService {
     value: number,
     step: number
   ): number {
-    if (!Number.isFinite(step) || step <= 0) {
+    if (
+      !Number.isFinite(step) ||
+      step <= 0
+    ) {
       return value;
     }
 
@@ -515,6 +499,15 @@ export class OrderExecutionService {
         let quantity: number | undefined;
         let price: number | undefined;
 
+        /*
+         * MARKET BUY:
+         *
+         * inputAmount = quote amount.
+         * Example: 10 USDT.
+         *
+         * The MEXC request uses quoteOrderQty,
+         * not quantity.
+         */
         if (
           side === 'BUY' &&
           orderType === 'MARKET'
@@ -560,6 +553,11 @@ export class OrderExecutionService {
           );
         }
 
+        /*
+         * LIMIT BUY:
+         * inputAmount is quote amount,
+         * quantity is calculated base amount.
+         */
         if (side === 'BUY') {
           price =
             this.getBestAsk(symbol) *
@@ -571,6 +569,10 @@ export class OrderExecutionService {
               inputAmount / price
             );
         } else {
+          /*
+           * SELL:
+           * inputAmount is base amount.
+           */
           quantity =
             this.roundQuantity(
               symbol,
@@ -585,7 +587,7 @@ export class OrderExecutionService {
         }
 
         if (
-          !quantity ||
+          quantity === undefined ||
           !Number.isFinite(quantity) ||
           quantity <= 0
         ) {
@@ -894,21 +896,22 @@ export class OrderExecutionService {
     opportunity: Opportunity,
     lastOrder: OrderResult
   ): boolean {
-    const expectedFinal =
-      (
-        opportunity as Opportunity & {
-          finalAmount?: number;
-        }
-      ).finalAmount;
+    const expectedFinal = (
+      opportunity as Opportunity & {
+        finalAmount?: number;
+      }
+    ).finalAmount;
 
     const actualFinal =
       lastOrder.receivedQuantity;
 
     if (
+      expectedFinal === undefined ||
+      actualFinal === undefined ||
       !Number.isFinite(expectedFinal) ||
       !Number.isFinite(actualFinal) ||
-      expectedFinal! <= 0 ||
-      actualFinal! <= 0
+      expectedFinal <= 0 ||
+      actualFinal <= 0
     ) {
       console.error(
         '[INVARIANT] Missing final amount'
@@ -918,9 +921,8 @@ export class OrderExecutionService {
     }
 
     const deviation =
-      Math.abs(
-        actualFinal! - expectedFinal!
-      ) / expectedFinal!;
+      Math.abs(actualFinal - expectedFinal) /
+      expectedFinal;
 
     const maxDeviation =
       this.config.maxExecutionDeviationRate ?? 0.02;
@@ -956,6 +958,31 @@ export class OrderExecutionService {
     );
   }
 
+  private async attemptCancel(
+    orderId: string,
+    symbol: string
+  ): Promise<void> {
+    try {
+      await this.client.cancelOrder(
+        orderId,
+        symbol
+      );
+
+      console.log(
+        `[CANCEL] Cancelled: ${orderId}`
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      console.error(
+        `[CANCEL] Failed to cancel ${orderId}: ${message}`
+      );
+    }
+  }
+
   private createReport(
     opportunity: Opportunity,
     orders: OrderResult[],
@@ -980,8 +1007,9 @@ export class OrderExecutionService {
 
     const actualProfit =
       fullyExecuted &&
+      actualFinal !== undefined &&
       Number.isFinite(actualFinal)
-        ? actualFinal! -
+        ? actualFinal -
           opportunity.startAmount
         : 0;
 
