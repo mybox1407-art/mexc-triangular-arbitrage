@@ -204,7 +204,7 @@ async function main(): Promise<void> {
 
   const executionConfig: OrderExecutionConfig = {
     orderSizeBase: 0.00238,
-    minProfitUsdt: 0.10,
+    minProfitUsdt: 0,
     maxRetries: 3,
     retryDelayMs: 500,
     orderTimeoutMs: 5000,
