@@ -5,25 +5,8 @@ export interface PlaceOrderParams {
   symbol: string;
   side: 'BUY' | 'SELL';
   orderType: 'MARKET' | 'LIMIT';
-
-  /**
-   * Количество базового актива.
-   *
-   * Примеры:
-   * - BUY QNTUSDT: количество QNT
-   * - SELL QNTUSDC: количество QNT
-   * - SELL USDCUSDT: количество USDC
-   */
   quantity?: string;
-
-  /**
-   * Сумма в quote-активе.
-   *
-   * Для MARKET BUY QNTUSDT:
-   * quoteOrderQty=10 означает потратить 10 USDT.
-   */
   quoteOrderQty?: string;
-
   price?: string;
   timeInForce?: 'GTC' | 'IOC' | 'FOK';
 }
@@ -49,30 +32,10 @@ export interface OrderStatus {
   side: string;
   type: string;
   status: string;
-
-  /**
-   * Для MEXC query-order response это поле может быть
-   * фактической ценой или исходной ценой ордера.
-   */
   price?: string;
-
-  /**
-   * Может отсутствовать в REST response.
-   * Если отсутствует, вычисляется как:
-   * cummulativeQuoteQty / executedQty
-   */
   avgPrice?: string;
-
-  /**
-   * Количество исполненного базового актива.
-   */
   executedQty: string;
-
-  /**
-   * Фактически исполненная сумма в quote-активе.
-   */
   cummulativeQuoteQty: string;
-
   time?: number;
   updateTime?: number;
 }
@@ -86,8 +49,8 @@ export interface TradeFee {
 type RequestValue = string | number;
 
 export class MexcAuthenticatedClient {
-  private apiKey: string;
-  private apiSecret: string;
+  private readonly apiKey: string;
+  private readonly apiSecret: string;
 
   constructor() {
     if (!config.mexc.apiKey || !config.mexc.apiSecret) {
@@ -119,31 +82,47 @@ export class MexcAuthenticatedClient {
       .digest('hex');
   }
 
-  private async readResponse(
-    response: Response
-  ): Promise<any> {
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      throw new Error(
-        `HTTP ${response.status}: ${responseText}`
-      );
-    }
-
-    try {
-      return JSON.parse(responseText);
-    } catch {
-      throw new Error(
-        `Invalid JSON response from MEXC: ${responseText}`
-      );
-    }
-  }
-
-  private getHeaders(): HeadersInit {
+  private headers(): HeadersInit {
     return {
       'X-MEXC-APIKEY': this.apiKey,
       'Content-Type': 'application/json'
     };
+  }
+
+  private async readResponse(
+    response: Response
+  ): Promise<any> {
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status}: ${text}`
+      );
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(
+        `Invalid JSON response from MEXC: ${text}`
+      );
+    }
+  }
+
+  private buildSignedUrl(
+    endpoint: string,
+    params: Record<string, RequestValue>
+  ): string {
+    const queryString =
+      this.buildQueryString(params);
+
+    const signature =
+      this.signQueryString(queryString);
+
+    return (
+      `${config.mexc.restUrl}${endpoint}?` +
+      `${queryString}&signature=${signature}`
+    );
   }
 
   async getTradeFee(
@@ -152,28 +131,19 @@ export class MexcAuthenticatedClient {
     const normalizedSymbol =
       symbol.toUpperCase();
 
-    const timestamp = Date.now();
-
     const params: Record<string, RequestValue> = {
       symbol: normalizedSymbol,
-      timestamp,
+      timestamp: Date.now(),
       recvWindow: 5000
     };
 
-    const queryString =
-      this.buildQueryString(params);
-
-    const signature =
-      this.signQueryString(queryString);
-
-    const url =
-      `${config.mexc.restUrl}/api/v3/tradeFee?` +
-      `${queryString}&signature=${signature}`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.getHeaders()
-    });
+    const response = await fetch(
+      this.buildSignedUrl('/api/v3/tradeFee', params),
+      {
+        method: 'GET',
+        headers: this.headers()
+      }
+    );
 
     const data =
       await this.readResponse(response);
@@ -212,19 +182,19 @@ export class MexcAuthenticatedClient {
     const symbol =
       params.symbol.toUpperCase();
 
-    if (
-      params.quantity === undefined &&
-      params.quoteOrderQty === undefined
-    ) {
+    const hasQuantity =
+      params.quantity !== undefined;
+
+    const hasQuoteOrderQty =
+      params.quoteOrderQty !== undefined;
+
+    if (!hasQuantity && !hasQuoteOrderQty) {
       throw new Error(
         'Either quantity or quoteOrderQty must be provided'
       );
     }
 
-    if (
-      params.quantity !== undefined &&
-      params.quoteOrderQty !== undefined
-    ) {
+    if (hasQuantity && hasQuoteOrderQty) {
       throw new Error(
         'quantity and quoteOrderQty cannot be used together'
       );
@@ -232,7 +202,7 @@ export class MexcAuthenticatedClient {
 
     if (
       params.orderType === 'LIMIT' &&
-      !params.quantity
+      !hasQuantity
     ) {
       throw new Error(
         'LIMIT order requires quantity'
@@ -257,8 +227,6 @@ export class MexcAuthenticatedClient {
       );
     }
 
-    const timestamp = Date.now();
-
     const requestBody: Record<
       string,
       RequestValue
@@ -266,17 +234,17 @@ export class MexcAuthenticatedClient {
       symbol,
       side: params.side,
       type: params.orderType,
-      timestamp,
+      timestamp: Date.now(),
       recvWindow: 5000
     };
 
-    if (params.quantity !== undefined) {
-      requestBody.quantity = params.quantity;
+    if (hasQuantity) {
+      requestBody.quantity = params.quantity!;
     }
 
-    if (params.quoteOrderQty !== undefined) {
+    if (hasQuoteOrderQty) {
       requestBody.quoteOrderQty =
-        params.quoteOrderQty;
+        params.quoteOrderQty!;
     }
 
     if (params.price !== undefined) {
@@ -287,16 +255,6 @@ export class MexcAuthenticatedClient {
       requestBody.timeInForce =
         params.timeInForce;
     }
-
-    const queryString =
-      this.buildQueryString(requestBody);
-
-    const signature =
-      this.signQueryString(queryString);
-
-    const url =
-      `${config.mexc.restUrl}/api/v3/order?` +
-      `${queryString}&signature=${signature}`;
 
     console.log(
       '[MEXC ORDER REQUEST]',
@@ -313,15 +271,18 @@ export class MexcAuthenticatedClient {
       })
     );
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: this.getHeaders()
-    });
+    const response = await fetch(
+      this.buildSignedUrl(
+        '/api/v3/order',
+        requestBody
+      ),
+      {
+        method: 'POST',
+        headers: this.headers()
+      }
+    );
 
-    const data =
-      await this.readResponse(response);
-
-    return data as NewOrderResponse;
+    return await this.readResponse(response);
   }
 
   async getOrderStatus(
@@ -331,39 +292,30 @@ export class MexcAuthenticatedClient {
     const normalizedSymbol =
       symbol.toUpperCase();
 
-    const timestamp = Date.now();
-
     const params: Record<string, RequestValue> = {
       symbol: normalizedSymbol,
       orderId,
-      timestamp,
+      timestamp: Date.now(),
       recvWindow: 5000
     };
 
-    const queryString =
-      this.buildQueryString(params);
-
-    const signature =
-      this.signQueryString(queryString);
-
-    const url =
-      `${config.mexc.restUrl}/api/v3/order?` +
-      `${queryString}&signature=${signature}`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.getHeaders()
-    });
+    const response = await fetch(
+      this.buildSignedUrl(
+        '/api/v3/order',
+        params
+      ),
+      {
+        method: 'GET',
+        headers: this.headers()
+      }
+    );
 
     const data =
       await this.readResponse(response);
 
-    const status =
-      data as OrderStatus;
-
     if (
-      !status.executedQty ||
-      !status.cummulativeQuoteQty
+      data.executedQty === undefined ||
+      data.cummulativeQuoteQty === undefined
     ) {
       console.warn(
         '[MEXC ORDER STATUS] Missing execution fields',
@@ -375,39 +327,30 @@ export class MexcAuthenticatedClient {
       );
     }
 
-    return status;
+    return data as OrderStatus;
   }
 
   async cancelOrder(
     orderId: string,
     symbol: string
   ): Promise<void> {
-    const normalizedSymbol =
-      symbol.toUpperCase();
-
-    const timestamp = Date.now();
-
     const params: Record<string, RequestValue> = {
-      symbol: normalizedSymbol,
+      symbol: symbol.toUpperCase(),
       orderId,
-      timestamp,
+      timestamp: Date.now(),
       recvWindow: 5000
     };
 
-    const queryString =
-      this.buildQueryString(params);
-
-    const signature =
-      this.signQueryString(queryString);
-
-    const url =
-      `${config.mexc.restUrl}/api/v3/order?` +
-      `${queryString}&signature=${signature}`;
-
-    const response = await fetch(url, {
-      method: 'DELETE',
-      headers: this.getHeaders()
-    });
+    const response = await fetch(
+      this.buildSignedUrl(
+        '/api/v3/order',
+        params
+      ),
+      {
+        method: 'DELETE',
+        headers: this.headers()
+      }
+    );
 
     await this.readResponse(response);
   }
@@ -420,27 +363,21 @@ export class MexcAuthenticatedClient {
       total: number;
     }>
   > {
-    const timestamp = Date.now();
-
     const params: Record<string, RequestValue> = {
-      timestamp,
+      timestamp: Date.now(),
       recvWindow: 5000
     };
 
-    const queryString =
-      this.buildQueryString(params);
-
-    const signature =
-      this.signQueryString(queryString);
-
-    const url =
-      `${config.mexc.restUrl}/api/v3/account?` +
-      `${queryString}&signature=${signature}`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.getHeaders()
-    });
+    const response = await fetch(
+      this.buildSignedUrl(
+        '/api/v3/account',
+        params
+      ),
+      {
+        method: 'GET',
+        headers: this.headers()
+      }
+    );
 
     const data =
       await this.readResponse(response);
