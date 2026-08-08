@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     throw new Error('MEXC_API_KEY and MEXC_API_SECRET are required for symbol-specific fee mode.');
   }
 
-  if (config.trading.startAsset !== 'USDT') {
+  if (config.trading.startAsset !== 'USDC') {
     throw new Error('USDC scanner requires START_ASSET=USDT in .env.');
   }
 
