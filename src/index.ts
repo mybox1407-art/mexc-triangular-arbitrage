@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   }
 
   if (config.trading.startAsset !== 'USDT') {
-    throw new Error('USDC scanner requires START_ASSET=USDC in .env.');
+    throw new Error('USDC scanner requires START_ASSET=USDT in .env.');
   }
 
   logger.info({
