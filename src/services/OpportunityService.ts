@@ -31,7 +31,7 @@ type FixedBookSnapshot = {
 };
 
 const STALE_BOOK_AFTER_MS = 5_000;
-const MAX_EXECUTION_BOOK_AGE_MS = 300;
+const MAX_EXECUTION_BOOK_AGE_MS = 500;
 const REPORT_THROTTLE_MS = 1_000;
 
 export class OpportunityService {
