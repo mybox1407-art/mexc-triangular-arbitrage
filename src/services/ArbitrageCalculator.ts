@@ -28,11 +28,13 @@ type BuyExecution = {
   baseAmount: number;
   quoteSpent: number;
   levelsUsed: number;
+  limitPrice: number;
 };
 
 type SellExecution = {
   quoteReceived: number;
   levelsUsed: number;
+  limitPrice: number;
 };
 
 export class ArbitrageCalculator {
@@ -489,6 +491,8 @@ export class ArbitrageCalculator {
         vwap:
           execution.quoteSpent /
           execution.baseAmount,
+        expectedLimitPrice:
+          execution.limitPrice,
         feePaidInOutput,
         levelsUsed:
           execution.levelsUsed
@@ -536,6 +540,8 @@ export class ArbitrageCalculator {
             inputAmount
           ) ?? inputAmount
         ),
+      expectedLimitPrice:
+        execution.limitPrice,
       feePaidInOutput,
       levelsUsed:
         execution.levelsUsed
@@ -566,6 +572,7 @@ export class ArbitrageCalculator {
     let baseAmount = 0;
     let quoteSpent = 0;
     let levelsUsed = 0;
+    let limitPrice = 0;
 
     for (const level of asks) {
       if (
@@ -607,12 +614,16 @@ export class ArbitrageCalculator {
         quoteAtLevel;
 
       levelsUsed += 1;
+
+      limitPrice =
+        level.price;
     }
 
     if (
       quoteLeft > 1e-8 ||
       baseAmount <= 0 ||
-      quoteSpent <= 0
+      quoteSpent <= 0 ||
+      limitPrice <= 0
     ) {
       return null;
     }
@@ -633,7 +644,8 @@ export class ArbitrageCalculator {
     return {
       baseAmount: roundedBase,
       quoteSpent,
-      levelsUsed
+      levelsUsed,
+      limitPrice
     };
   }
 
@@ -660,6 +672,7 @@ export class ArbitrageCalculator {
 
     let quoteReceived = 0;
     let levelsUsed = 0;
+    let limitPrice = 0;
 
     for (const level of bids) {
       if (
@@ -691,18 +704,23 @@ export class ArbitrageCalculator {
         baseAtLevel;
 
       levelsUsed += 1;
+
+      limitPrice =
+        level.price;
     }
 
     if (
       baseLeft > 1e-8 ||
-      quoteReceived <= 0
+      quoteReceived <= 0 ||
+      limitPrice <= 0
     ) {
       return null;
     }
 
     return {
       quoteReceived,
-      levelsUsed
+      levelsUsed,
+      limitPrice
     };
   }
 }
