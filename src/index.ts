@@ -54,129 +54,116 @@ const csvBestRouteWriter = new CsvBestRouteWriter(config.csvBestRoutesPath);
 const performanceLogWriter = new PerformanceLogWriter(config.performanceLogPath);
 const telegramNotifier = new TelegramNotifier();
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-function extractNumberFilters(symbolInfo: any): SymbolFilter {
-  // LOT_SIZE -> stepSize
-  let stepSize = 1e-8;
-  // PRICE_FILTER -> tickSize
-  let tickSize = 1e-8;
-  // NOTIONAL -> minNotional
-  let minNotional = 1;
-  // quoteScale выводим из tickSize
-  let quoteScale = 4;
+function extractSymbolFilters(exchangeInfo: any): Map<string, SymbolFilter> {
+  const symbolFilters = new Map<string, SymbolFilter>();
 
-  const filters: any[] = symbolInfo.filters ?? [];
+  const symbols: any[] = Array.isArray(exchangeInfo?.symbols)
+    ? exchangeInfo.symbols
+    : [];
 
-  for (const f of filters) {
-    const filterType = String(f.filterType ?? '').toUpperCase();
+  for (const s of symbols) {
+    const symbol = String(s.symbol ?? '').toUpperCase();
+    if (!symbol) continue;
 
-    if (filterType === 'LOT_SIZE') {
-      if (typeof f.stepSize === 'string') {
-        stepSize = Number(f.stepSize);
-      } else if (typeof f.stepSize === 'number') {
-        stepSize = f.stepSize;
+    const filters: any[] = Array.isArray(s.filters) ? s.filters : [];
+
+    let stepSize = 1e-8;
+    let tickSize = 1e-8;
+    let minNotional = 1;
+    let quoteScale = 4;
+
+    for (const f of filters) {
+      const filterType = String(f.filterType ?? '').toUpperCase();
+
+      if (filterType === 'LOT_SIZE') {
+        if (typeof f.stepSize === 'string') {
+          stepSize = Number(f.stepSize);
+        } else if (typeof f.stepSize === 'number') {
+          stepSize = f.stepSize;
+        }
+      }
+
+      if (filterType === 'PRICE_FILTER') {
+        if (typeof f.tickSize === 'string') {
+          tickSize = Number(f.tickSize);
+        } else if (typeof f.tickSize === 'number') {
+          tickSize = f.tickSize;
+        }
+      }
+
+      if (filterType === 'NOTIONAL' || filterType === 'MIN_NOTIONAL') {
+        if (typeof f.minNotional === 'string') {
+          minNotional = Number(f.minNotional);
+        } else if (typeof f.minNotional === 'number') {
+          minNotional = f.minNotional;
+        }
       }
     }
 
-    if (filterType === 'PRICE_FILTER') {
-      if (typeof f.tickSize === 'string') {
-        tickSize = Number(f.tickSize);
-      } else if (typeof f.tickSize === 'number') {
-        tickSize = f.tickSize;
+    // quoteScale из tickSize
+    if (Number.isFinite(tickSize) && tickSize > 0) {
+      const str = tickSize.toFixed(12);
+      const m = str.match(/0\.0*(\d+)/);
+      if (m) {
+        quoteScale = m[1].length;
+      } else {
+        quoteScale = 4;
       }
-    }
-
-    if (filterType === 'NOTIONAL' || filterType === 'MIN_NOTIONAL') {
-      if (typeof f.minNotional === 'string') {
-        minNotional = Number(f.minNotional);
-      } else if (typeof f.minNotional === 'number') {
-        minNotional = f.minNotional;
-      }
-    }
-  }
-
-  // quoteScale из tickSize: считаем количество знаков после запятой
-  if (Number.isFinite(tickSize) && tickSize > 0) {
-    const s = tickSize.toFixed(12);
-    const m = s.match(/0\.0*(\d+)/);
-    if (m) {
-      quoteScale = m[1].length;
     } else {
       quoteScale = 4;
     }
-  } else {
-    quoteScale = 4;
+
+    symbolFilters.set(symbol, {
+      stepSize,
+      tickSize,
+      minNotional,
+      quoteScale
+    });
   }
 
-  return {
-    stepSize,
-    tickSize,
-    minNotional,
-    quoteScale
-  };
+  return symbolFilters;
 }
 
-async function loadSymbolFilters(
+async function loadSymbolFiltersForSymbols(
   rest: MexcRestClient,
   symbols: { symbol: string }[]
 ): Promise<Map<string, SymbolFilter>> {
-  const symbolFilters = new Map<string, SymbolFilter>();
+  const exchangeInfo: any = await rest.getExchangeInfo();
+  const allFilters = extractSymbolFilters(exchangeInfo);
 
-  // Пытаемся дёрнуть exchangeInfo / symbols endpoint, если он есть в MexcRestClient.
-  // Если у тебя нет такого метода, можно сделать заглушку и заполнить фильтрами по умолчанию.
-  // Ниже пример, если есть метод getExchangeInfo(), возвращающий массив символов с filters.
+  const result = new Map<string, SymbolFilter>();
 
-  try {
-    // Предположим, что getExchangeInfo() возвращает массив like:
-    // [{ symbol: 'BTCUSDT', status: '1', baseAsset: 'BTC', quoteAsset: 'USDT', filters: [...] }, ...]
-    const exchangeInfo: any[] = await (rest as any).getExchangeInfo();
-
-    const bySymbol = new Map<string, any>();
-    for (const info of exchangeInfo) {
-      const sym = String(info.symbol ?? '').toUpperCase();
-      if (sym) {
-        bySymbol.set(sym, info);
-      }
-    }
-
-    for (const s of symbols) {
-      const sym = s.symbol.toUpperCase();
-      const info = bySymbol.get(sym);
-      if (!info) {
-        continue;
-      }
-      const filter = extractNumberFilters(info);
-      symbolFilters.set(sym, filter);
-    }
-  } catch {
-    // Fallback: заполняем дефолтными фильтрами
-    for (const s of symbols) {
-      const sym = s.symbol.toUpperCase();
+  for (const s of symbols) {
+    const sym = s.symbol.toUpperCase();
+    const filter = allFilters.get(sym);
+    if (filter) {
+      result.set(sym, filter);
+    } else {
+      // Fallback для неизвестных пар
       const isStable =
         sym.endsWith('USDT') ||
         sym.endsWith('USDC') ||
         sym.endsWith('FDUSD');
 
-      const filter: SymbolFilter = {
+      result.set(sym, {
         stepSize: 1e-6,
         tickSize: isStable ? 0.0001 : 0.0001,
         minNotional: 1,
         quoteScale: isStable ? 2 : 4
-      };
-
-      symbolFilters.set(sym, filter);
+      });
     }
   }
 
-  return symbolFilters;
+  return result;
 }
 
 async function main(): Promise<void> {
   ConfigValidator.validateOrThrow(config);
   logger.info('✅ Configuration validated');
 
-  // ✅ УБРАЛ БЛОКИРОВКУ LIVE_TRADING
   // if (config.trading.liveTrading) {
   //   throw new Error('LIVE_TRADING=true is intentionally blocked in MVP. First collect paper-trading statistics.');
   // }
@@ -209,7 +196,9 @@ async function main(): Promise<void> {
 
   const symbols = await new ExchangeInfoLoader(rest).loadSpotSymbols();
   const liquidSymbols = symbols.filter(
-    (symbol) => ALLOWED_ASSETS.has(symbol.baseAsset) && ALLOWED_ASSETS.has(symbol.quoteAsset)
+    (symbol) =>
+      ALLOWED_ASSETS.has(symbol.baseAsset) &&
+      ALLOWED_ASSETS.has(symbol.quoteAsset)
   );
 
   logger.info({
@@ -218,7 +207,11 @@ async function main(): Promise<void> {
     liquidSymbols: liquidSymbols.map((symbol) => symbol.symbol)
   }, 'Filtered liquid symbols');
 
-  const allTriangles = new TriangleBuilder().build(liquidSymbols, config.trading.startAsset, config.trading.crossAssets);
+  const allTriangles = new TriangleBuilder().build(
+    liquidSymbols,
+    config.trading.startAsset,
+    config.trading.crossAssets
+  );
   const triangles = allTriangles.slice(0, MAX_TRIANGLES);
 
   const directTriangles = triangles.filter(t => !t.isCrossRoute);
@@ -244,9 +237,16 @@ async function main(): Promise<void> {
     throw new Error('No USDC triangles found for allowed assets.');
   }
 
-  const candidateSymbols = [...new Set(triangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol)))];
+  const candidateSymbols = [...new Set(
+    triangles.flatMap((triangle) =>
+      triangle.legs.map((leg) => leg.symbol)
+    )
+  )];
 
-  const takerFeesBySymbol = await new MexcTradeFeeLoader(authenticatedClient, logger).loadTakerFees(candidateSymbols);
+  const takerFeesBySymbol = await new MexcTradeFeeLoader(
+    authenticatedClient,
+    logger
+  ).loadTakerFees(candidateSymbols);
 
   const zeroFeeSymbols = [...takerFeesBySymbol.entries()]
     .filter(([, feeRate]) => Math.abs(feeRate) <= ZERO_FEE_EPSILON)
@@ -275,10 +275,16 @@ async function main(): Promise<void> {
   }, 'Filtered USDC low-fee triangles');
 
   if (lowFeeTriangles.length === 0) {
-    throw new Error('No USDC triangles with no more than one paid leg were found.');
+    throw new Error(
+      'No USDC triangles with no more than one paid leg were found.'
+    );
   }
 
-  const usedSymbols = [...new Set(lowFeeTriangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol)))];
+  const usedSymbols = [...new Set(
+    lowFeeTriangles.flatMap((triangle) =>
+      triangle.legs.map((leg) => leg.symbol)
+    )
+  )];
 
   logger.info({
     selectedTriangles: lowFeeTriangles.length,
@@ -286,8 +292,8 @@ async function main(): Promise<void> {
     usedSymbols
   }, 'USDC low-fee scanner initialized');
 
-  // Загружаем symbolFilters для всех используемых пар
-  const symbolFilters = await loadSymbolFilters(
+  // Загружаем symbolFilters из MEXC для всех используемых пар
+  const symbolFilters = await loadSymbolFiltersForSymbols(
     rest,
     usedSymbols.map((symbol) => ({ symbol }))
   );
@@ -301,7 +307,7 @@ async function main(): Promise<void> {
       minNotional: f.minNotional,
       quoteScale: f.quoteScale
     }))
-  }, 'Loaded symbol filters');
+  }, 'Loaded symbol filters from MEXC');
 
   const books = new Map<string, OrderBook>();
 
@@ -311,10 +317,16 @@ async function main(): Promise<void> {
       const snapshot = await rest.getDepth(symbol, 100);
       book.loadSnapshot(snapshot);
       books.set(symbol, book);
-      logger.info({ symbol, loadedBooks: books.size, totalBooks: usedSymbols.length }, 'Order book snapshot loaded');
+      logger.info(
+        { symbol, loadedBooks: books.size, totalBooks: usedSymbols.length },
+        'Order book snapshot loaded'
+      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.warn({ err: error, symbol, errorMessage }, 'Cannot load order book snapshot; symbol will be skipped');
+      logger.warn(
+        { err: error, symbol, errorMessage },
+        'Cannot load order book snapshot; symbol will be skipped'
+      );
     }
     await sleep(SNAPSHOT_DELAY_MS);
   }
@@ -324,10 +336,16 @@ async function main(): Promise<void> {
   );
 
   if (readyTriangles.length === 0) {
-    throw new Error('No low-fee USDC triangles with fully initialized order books.');
+    throw new Error(
+      'No low-fee USDC triangles with fully initialized order books.'
+    );
   }
 
-  const readySymbols = [...new Set(readyTriangles.flatMap((triangle) => triangle.legs.map((leg) => leg.symbol)))];
+  const readySymbols = [...new Set(
+    readyTriangles.flatMap((triangle) =>
+      triangle.legs.map((leg) => leg.symbol)
+    )
+  )];
 
   logger.info({
     requestedLowFeeTriangles: lowFeeTriangles.length,
@@ -351,7 +369,11 @@ async function main(): Promise<void> {
     symbolFilters
   };
 
-  const executionService = new OrderExecutionService(authenticatedClient, books, executionConfig);
+  const executionService = new OrderExecutionService(
+    authenticatedClient,
+    books,
+    executionConfig
+  );
 
   const opportunityService = new OpportunityService(
     readyTriangles,
@@ -411,35 +433,50 @@ async function main(): Promise<void> {
 
   setInterval(() => {
     const now = Date.now();
-    const snapshots = [...books.values()].map((book) => book.getSnapshot(5));
-    const readyBooks = snapshots.filter((snapshot) => snapshot.ready);
-    const staleBooks = readyBooks.filter((snapshot) => now - snapshot.updatedAt > STALE_BOOK_AFTER_MS);
-    const emptyBooks = snapshots.filter((snapshot) => snapshot.bids.length === 0 || snapshot.asks.length === 0);
+    const snapshots = [...books.values()].map((book) =>
+      book.getSnapshot(5)
+    );
 
-    logger.info({
-      totalBooks: snapshots.length,
-      readyBooks: readyBooks.length,
-      staleBooks: staleBooks.length,
-      emptyBooks: emptyBooks.length,
-      sample: snapshots.slice(0, 5).map((snapshot) => ({
-        symbol: snapshot.symbol,
-        ready: snapshot.ready,
-        bid: snapshot.bids[0]?.price ?? null,
-        ask: snapshot.asks[0]?.price ?? null,
-        ageMs: now - snapshot.updatedAt,
-        lastUpdateId: snapshot.lastUpdateId
-      }))
-    }, 'USDC low-fee order book health');
+    const readyBooks = snapshots.filter((snapshot) => snapshot.ready);
+
+    const staleBooks = readyBooks.filter(
+      (snapshot) => now - snapshot.updatedAt > STALE_BOOK_AFTER_MS
+    );
+
+    const emptyBooks = snapshots.filter(
+      (snapshot) =>
+        snapshot.bids.length === 0 || snapshot.asks.length === 0
+    );
+
+    logger.info(
+      {
+        totalBooks: snapshots.length,
+        readyBooks: readyBooks.length,
+        staleBooks: staleBooks.length,
+        emptyBooks: emptyBooks.length,
+        sample: snapshots.slice(0, 5).map((snapshot) => ({
+          symbol: snapshot.symbol,
+          ready: snapshot.ready,
+          bid: snapshot.bids[0]?.price ?? null,
+          ask: snapshot.asks[0]?.price ?? null,
+          ageMs: now - snapshot.updatedAt,
+          lastUpdateId: snapshot.lastUpdateId
+        }))
+      },
+      'USDC low-fee order book health'
+    );
   }, HEALTH_CHECK_INTERVAL_MS);
 
   await ws.connect();
 
   const shutdown = async (): Promise<void> => {
     logger.info('Shutdown started');
-    void telegramNotifier.send('🛑 Arbitrage scanner stopped').catch((error) => {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.warn({ err: error, errorMessage }, 'Failed to send shutdown Telegram message');
-    });
+    void telegramNotifier
+      .send('🛑 Arbitrage scanner stopped')
+      .catch((error) => {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.warn({ err: error, errorMessage }, 'Failed to send shutdown Telegram message');
+      });
     ws.stop();
     process.exit(0);
   };
