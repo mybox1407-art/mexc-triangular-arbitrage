@@ -196,7 +196,10 @@ export class OrderExecutionService {
           side: leg.side,
           fromAsset: leg.fromAsset,
           toAsset: leg.toAsset,
-          outputAmount: leg.outputAmount
+          inputAmount: leg.inputAmount,
+          outputAmount: leg.outputAmount,
+          expectedLimitPrice:
+            leg.expectedLimitPrice
         }))
       })
     );
@@ -371,7 +374,8 @@ export class OrderExecutionService {
       };
     }
 
-    const step = legIndex + 1;
+    const step =
+      legIndex + 1;
 
     if (
       !Number.isFinite(inputAmount) ||
@@ -400,18 +404,36 @@ export class OrderExecutionService {
       };
     }
 
+    if (
+      !Number.isFinite(
+        leg.expectedLimitPrice
+      ) ||
+      leg.expectedLimitPrice <= 0
+    ) {
+      return {
+        success: false,
+        error:
+          `Invalid expected limit price at step ${step}: ` +
+          `${leg.expectedLimitPrice}`,
+        timestamp: Date.now()
+      };
+    }
+
     console.log(
       leg.side === 'BUY'
         ? `[STEP${step}] BUY ${leg.symbol}, ` +
-          `spending ${inputAmount} quote`
+          `spending ${inputAmount} quote, ` +
+          `limitPrice=${leg.expectedLimitPrice}`
         : `[STEP${step}] SELL ${leg.symbol}, ` +
-          `selling ${inputAmount} base`
+          `selling ${inputAmount} base, ` +
+          `limitPrice=${leg.expectedLimitPrice}`
     );
 
     return this.placeOrder(
       leg.symbol,
       leg.side,
-      inputAmount
+      inputAmount,
+      leg.expectedLimitPrice
     );
   }
 
@@ -489,7 +511,8 @@ export class OrderExecutionService {
       );
     }
 
-    const factor = 10 ** 8;
+    const factor =
+      10 ** 8;
 
     return (
       Math.round(price * factor) /
@@ -520,7 +543,8 @@ export class OrderExecutionService {
       );
     }
 
-    const factor = 10 ** 4;
+    const factor =
+      10 ** 4;
 
     return (
       Math.floor(quoteQty * factor) /
@@ -620,7 +644,8 @@ export class OrderExecutionService {
   private async placeOrder(
     symbol: string,
     side: 'BUY' | 'SELL',
-    inputAmount: number
+    inputAmount: number,
+    expectedLimitPrice: number
   ): Promise<OrderResult> {
     for (
       let attempt = 1;
@@ -632,6 +657,25 @@ export class OrderExecutionService {
           this.config.useMarketOrders
             ? 'MARKET'
             : 'LIMIT';
+
+        if (
+          orderType === 'LIMIT' &&
+          (
+            !Number.isFinite(
+              expectedLimitPrice
+            ) ||
+            expectedLimitPrice <= 0
+          )
+        ) {
+          return {
+            success: false,
+            error:
+              `Invalid expected limit price ` +
+              `for ${symbol}: ` +
+              `${expectedLimitPrice}`,
+            timestamp: Date.now()
+          };
+        }
 
         let quantity:
           | number
@@ -649,8 +693,7 @@ export class OrderExecutionService {
             this.config.minOrderNotional ?? 1;
 
           if (
-            inputAmount <
-            minNotional
+            inputAmount < minNotional
           ) {
             return {
               success: false,
@@ -724,16 +767,9 @@ export class OrderExecutionService {
 
         if (side === 'BUY') {
           price =
-            this.getBestAsk(symbol) *
-            (
-              1 +
-              this.config.aggressivePriceRate
-            );
-
-          price =
             this.roundPrice(
               symbol,
-              price
+              expectedLimitPrice
             );
 
           const rawQuantity =
@@ -790,16 +826,9 @@ export class OrderExecutionService {
             orderType === 'LIMIT'
           ) {
             price =
-              this.getBestBid(symbol) *
-              (
-                1 -
-                this.config.aggressivePriceRate
-              );
-
-            price =
               this.roundPrice(
                 symbol,
-                price
+                expectedLimitPrice
               );
           }
         }
@@ -840,10 +869,14 @@ export class OrderExecutionService {
           );
         }
 
+        const referencePrice =
+          price ??
+          this.getBestBid(symbol);
+
         const notional =
           side === 'SELL'
             ? quantity *
-              this.getBestBid(symbol)
+              referencePrice
             : inputAmount;
 
         const filter =
@@ -1425,32 +1458,6 @@ export class OrderExecutionService {
     }
 
     return snapshot.bids[0].price;
-  }
-
-  private getBestAsk(
-    symbol: string
-  ): number {
-    const book =
-      this.orderBooks.get(symbol);
-
-    if (!book) {
-      throw new Error(
-        `Order book not found for ${symbol}`
-      );
-    }
-
-    const snapshot =
-      book.getSnapshot(5);
-
-    if (
-      snapshot.asks.length === 0
-    ) {
-      throw new Error(
-        `No asks for ${symbol}`
-      );
-    }
-
-    return snapshot.asks[0].price;
   }
 
   private sleep(
