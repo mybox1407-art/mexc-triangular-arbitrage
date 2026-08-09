@@ -14,7 +14,11 @@ import { OpportunityService } from './services/OpportunityService.js';
 import { PerformanceLogWriter } from './services/PerformanceLogWriter.js';
 import { TelegramNotifier } from './services/TelegramNotifier.js';
 import { TriangleBuilder } from './services/TriangleBuilder.js';
-import { OrderExecutionService, OrderExecutionConfig } from './services/OrderExecutionService.js';
+import {
+  OrderExecutionService,
+  OrderExecutionConfig,
+  SymbolFilter
+} from './services/OrderExecutionService.js';
 
 const ALLOWED_ASSETS = new Set([
   'USDC', 'USDT', 'BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'LTC', 'BCH', 'TRX',
@@ -51,6 +55,122 @@ const performanceLogWriter = new PerformanceLogWriter(config.performanceLogPath)
 const telegramNotifier = new TelegramNotifier();
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function extractNumberFilters(symbolInfo: any): SymbolFilter {
+  // LOT_SIZE -> stepSize
+  let stepSize = 1e-8;
+  // PRICE_FILTER -> tickSize
+  let tickSize = 1e-8;
+  // NOTIONAL -> minNotional
+  let minNotional = 1;
+  // quoteScale выводим из tickSize
+  let quoteScale = 4;
+
+  const filters: any[] = symbolInfo.filters ?? [];
+
+  for (const f of filters) {
+    const filterType = String(f.filterType ?? '').toUpperCase();
+
+    if (filterType === 'LOT_SIZE') {
+      if (typeof f.stepSize === 'string') {
+        stepSize = Number(f.stepSize);
+      } else if (typeof f.stepSize === 'number') {
+        stepSize = f.stepSize;
+      }
+    }
+
+    if (filterType === 'PRICE_FILTER') {
+      if (typeof f.tickSize === 'string') {
+        tickSize = Number(f.tickSize);
+      } else if (typeof f.tickSize === 'number') {
+        tickSize = f.tickSize;
+      }
+    }
+
+    if (filterType === 'NOTIONAL' || filterType === 'MIN_NOTIONAL') {
+      if (typeof f.minNotional === 'string') {
+        minNotional = Number(f.minNotional);
+      } else if (typeof f.minNotional === 'number') {
+        minNotional = f.minNotional;
+      }
+    }
+  }
+
+  // quoteScale из tickSize: считаем количество знаков после запятой
+  if (Number.isFinite(tickSize) && tickSize > 0) {
+    const s = tickSize.toFixed(12);
+    const m = s.match(/0\.0*(\d+)/);
+    if (m) {
+      quoteScale = m[1].length;
+    } else {
+      quoteScale = 4;
+    }
+  } else {
+    quoteScale = 4;
+  }
+
+  return {
+    stepSize,
+    tickSize,
+    minNotional,
+    quoteScale
+  };
+}
+
+async function loadSymbolFilters(
+  rest: MexcRestClient,
+  symbols: { symbol: string }[]
+): Promise<Map<string, SymbolFilter>> {
+  const symbolFilters = new Map<string, SymbolFilter>();
+
+  // Пытаемся дёрнуть exchangeInfo / symbols endpoint, если он есть в MexcRestClient.
+  // Если у тебя нет такого метода, можно сделать заглушку и заполнить фильтрами по умолчанию.
+  // Ниже пример, если есть метод getExchangeInfo(), возвращающий массив символов с filters.
+
+  try {
+    // Предположим, что getExchangeInfo() возвращает массив like:
+    // [{ symbol: 'BTCUSDT', status: '1', baseAsset: 'BTC', quoteAsset: 'USDT', filters: [...] }, ...]
+    const exchangeInfo: any[] = await (rest as any).getExchangeInfo();
+
+    const bySymbol = new Map<string, any>();
+    for (const info of exchangeInfo) {
+      const sym = String(info.symbol ?? '').toUpperCase();
+      if (sym) {
+        bySymbol.set(sym, info);
+      }
+    }
+
+    for (const s of symbols) {
+      const sym = s.symbol.toUpperCase();
+      const info = bySymbol.get(sym);
+      if (!info) {
+        continue;
+      }
+      const filter = extractNumberFilters(info);
+      symbolFilters.set(sym, filter);
+    }
+  } catch {
+    // Fallback: заполняем дефолтными фильтрами
+    for (const s of symbols) {
+      const sym = s.symbol.toUpperCase();
+      const isStable =
+        sym.endsWith('USDT') ||
+        sym.endsWith('USDC') ||
+        sym.endsWith('FDUSD');
+
+      const filter: SymbolFilter = {
+        stepSize: 1e-6,
+        tickSize: isStable ? 0.0001 : 0.0001,
+        minNotional: 1,
+        quoteScale: isStable ? 2 : 4
+      };
+
+      symbolFilters.set(sym, filter);
+    }
+  }
+
+  return symbolFilters;
+}
 
 async function main(): Promise<void> {
   ConfigValidator.validateOrThrow(config);
@@ -166,6 +286,23 @@ async function main(): Promise<void> {
     usedSymbols
   }, 'USDC low-fee scanner initialized');
 
+  // Загружаем symbolFilters для всех используемых пар
+  const symbolFilters = await loadSymbolFilters(
+    rest,
+    usedSymbols.map((symbol) => ({ symbol }))
+  );
+
+  logger.info({
+    symbolFiltersCount: symbolFilters.size,
+    sample: [...symbolFilters.entries()].slice(0, 5).map(([symbol, f]) => ({
+      symbol,
+      stepSize: f.stepSize,
+      tickSize: f.tickSize,
+      minNotional: f.minNotional,
+      quoteScale: f.quoteScale
+    }))
+  }, 'Loaded symbol filters');
+
   const books = new Map<string, OrderBook>();
 
   for (const symbol of usedSymbols) {
@@ -210,7 +347,8 @@ async function main(): Promise<void> {
     orderTimeoutMs: 5000,
     enabled: config.trading.liveTrading,
     useMarketOrders: true,
-    aggressivePriceRate: 0
+    aggressivePriceRate: 0,
+    symbolFilters
   };
 
   const executionService = new OrderExecutionService(authenticatedClient, books, executionConfig);
