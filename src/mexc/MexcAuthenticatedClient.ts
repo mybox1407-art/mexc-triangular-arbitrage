@@ -36,8 +36,26 @@ export interface OrderStatus {
   avgPrice?: string;
   executedQty: string;
   cummulativeQuoteQty: string;
+  cumulativeQuoteQty?: string;
   time?: number;
   updateTime?: number;
+}
+
+export interface AccountTrade {
+  symbol: string;
+  id: string;
+  orderId: string;
+  price: string;
+  qty: string;
+  quoteQty: string;
+  commission: string;
+  commissionAsset: string;
+  time: number;
+  isBuyer: boolean;
+  isMaker: boolean;
+  isBestMatch?: boolean;
+  isSelfTrade?: boolean;
+  clientOrderId?: string | null;
 }
 
 export interface TradeFee {
@@ -53,7 +71,10 @@ export class MexcAuthenticatedClient {
   private readonly apiSecret: string;
 
   constructor() {
-    if (!config.mexc.apiKey || !config.mexc.apiSecret) {
+    if (
+      !config.mexc.apiKey ||
+      !config.mexc.apiSecret
+    ) {
       throw new Error(
         'MEXC API credentials not configured'
       );
@@ -68,7 +89,10 @@ export class MexcAuthenticatedClient {
   ): string {
     return new URLSearchParams(
       Object.entries(params).map(
-        ([key, value]) => [key, String(value)]
+        ([key, value]) => [
+          key,
+          String(value)
+        ]
       )
     ).toString();
   }
@@ -77,7 +101,10 @@ export class MexcAuthenticatedClient {
     queryString: string
   ): string {
     return crypto
-      .createHmac('sha256', this.apiSecret)
+      .createHmac(
+        'sha256',
+        this.apiSecret
+      )
       .update(queryString)
       .digest('hex');
   }
@@ -92,7 +119,8 @@ export class MexcAuthenticatedClient {
   private async readResponse(
     response: Response
   ): Promise<any> {
-    const text = await response.text();
+    const text =
+      await response.text();
 
     if (!response.ok) {
       throw new Error(
@@ -131,14 +159,20 @@ export class MexcAuthenticatedClient {
     const normalizedSymbol =
       symbol.toUpperCase();
 
-    const params: Record<string, RequestValue> = {
+    const params: Record<
+      string,
+      RequestValue
+    > = {
       symbol: normalizedSymbol,
       timestamp: Date.now(),
       recvWindow: 5000
     };
 
     const response = await fetch(
-      this.buildSignedUrl('/api/v3/tradeFee', params),
+      this.buildSignedUrl(
+        '/api/v3/tradeFee',
+        params
+      ),
       {
         method: 'GET',
         headers: this.headers()
@@ -153,26 +187,32 @@ export class MexcAuthenticatedClient {
         ? data.data[0]
         : data.data ?? data;
 
-    const makerFeeRate = Number(
-      feeData?.makerCommission ??
-      feeData?.makerFeeRate ??
-      config.trading.takerFeeRate
-    );
+    const makerFeeRate =
+      Number(
+        feeData?.makerCommission ??
+        feeData?.makerFeeRate ??
+        config.trading.takerFeeRate
+      );
 
-    const takerFeeRate = Number(
-      feeData?.takerCommission ??
-      feeData?.takerFeeRate ??
-      config.trading.takerFeeRate
-    );
+    const takerFeeRate =
+      Number(
+        feeData?.takerCommission ??
+        feeData?.takerFeeRate ??
+        config.trading.takerFeeRate
+      );
 
     return {
       symbol: normalizedSymbol,
-      makerFeeRate: Number.isFinite(makerFeeRate)
-        ? makerFeeRate
-        : config.trading.takerFeeRate,
-      takerFeeRate: Number.isFinite(takerFeeRate)
-        ? takerFeeRate
-        : config.trading.takerFeeRate
+
+      makerFeeRate:
+        Number.isFinite(makerFeeRate)
+          ? makerFeeRate
+          : config.trading.takerFeeRate,
+
+      takerFeeRate:
+        Number.isFinite(takerFeeRate)
+          ? takerFeeRate
+          : config.trading.takerFeeRate
     };
   }
 
@@ -239,7 +279,8 @@ export class MexcAuthenticatedClient {
     };
 
     if (hasQuantity) {
-      requestBody.quantity = params.quantity!;
+      requestBody.quantity =
+        params.quantity!;
     }
 
     if (hasQuoteOrderQty) {
@@ -248,7 +289,8 @@ export class MexcAuthenticatedClient {
     }
 
     if (params.price !== undefined) {
-      requestBody.price = params.price;
+      requestBody.price =
+        params.price;
     }
 
     if (params.timeInForce !== undefined) {
@@ -262,10 +304,12 @@ export class MexcAuthenticatedClient {
         symbol,
         side: params.side,
         type: params.orderType,
-        quantity: params.quantity ?? null,
+        quantity:
+          params.quantity ?? null,
         quoteOrderQty:
           params.quoteOrderQty ?? null,
-        price: params.price ?? null,
+        price:
+          params.price ?? null,
         timeInForce:
           params.timeInForce ?? null
       })
@@ -282,7 +326,9 @@ export class MexcAuthenticatedClient {
       }
     );
 
-    return await this.readResponse(response);
+    return await this.readResponse(
+      response
+    );
   }
 
   async getOrderStatus(
@@ -292,7 +338,10 @@ export class MexcAuthenticatedClient {
     const normalizedSymbol =
       symbol.toUpperCase();
 
-    const params: Record<string, RequestValue> = {
+    const params: Record<
+      string,
+      RequestValue
+    > = {
       symbol: normalizedSymbol,
       orderId,
       timestamp: Date.now(),
@@ -315,7 +364,12 @@ export class MexcAuthenticatedClient {
 
     if (
       data.executedQty === undefined ||
-      data.cummulativeQuoteQty === undefined
+      (
+        data.cummulativeQuoteQty ===
+        undefined &&
+        data.cumulativeQuoteQty ===
+        undefined
+      )
     ) {
       console.warn(
         '[MEXC ORDER STATUS] Missing execution fields',
@@ -330,11 +384,54 @@ export class MexcAuthenticatedClient {
     return data as OrderStatus;
   }
 
+  async getMyTrades(
+    symbol: string,
+    orderId: string
+  ): Promise<AccountTrade[]> {
+    const normalizedSymbol =
+      symbol.toUpperCase();
+
+    const params: Record<
+      string,
+      RequestValue
+    > = {
+      symbol: normalizedSymbol,
+      orderId,
+      timestamp: Date.now(),
+      recvWindow: 5000
+    };
+
+    const response = await fetch(
+      this.buildSignedUrl(
+        '/api/v3/myTrades',
+        params
+      ),
+      {
+        method: 'GET',
+        headers: this.headers()
+      }
+    );
+
+    const data =
+      await this.readResponse(response);
+
+    if (!Array.isArray(data)) {
+      throw new Error(
+        `Invalid myTrades response for ${normalizedSymbol}`
+      );
+    }
+
+    return data as AccountTrade[];
+  }
+
   async cancelOrder(
     orderId: string,
     symbol: string
   ): Promise<void> {
-    const params: Record<string, RequestValue> = {
+    const params: Record<
+      string,
+      RequestValue
+    > = {
       symbol: symbol.toUpperCase(),
       orderId,
       timestamp: Date.now(),
@@ -363,7 +460,10 @@ export class MexcAuthenticatedClient {
       total: number;
     }>
   > {
-    const params: Record<string, RequestValue> = {
+    const params: Record<
+      string,
+      RequestValue
+    > = {
       timestamp: Date.now(),
       recvWindow: 5000
     };
@@ -382,7 +482,9 @@ export class MexcAuthenticatedClient {
     const data =
       await this.readResponse(response);
 
-    if (!Array.isArray(data.balances)) {
+    if (
+      !Array.isArray(data.balances)
+    ) {
       throw new Error(
         'Invalid balances response from MEXC'
       );
@@ -406,7 +508,9 @@ export class MexcAuthenticatedClient {
           Number(balance.locked ?? 0);
 
         return {
-          asset: String(balance.asset),
+          asset: String(
+            balance.asset
+          ),
           free,
           locked,
           total: free + locked
