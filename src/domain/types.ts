@@ -54,6 +54,7 @@ export interface SimulatedLeg {
   inputAmount: number;
   outputAmount: number;
   vwap: number;
+  expectedLimitPrice: number;
   feePaidInOutput: number;
   levelsUsed: number;
 }
@@ -64,25 +65,29 @@ export interface Opportunity {
   startAmount: number;
   finalAmount: number;
 
-  // ROI до учёта комиссий (чистый VWAP, ideal).
+  // ROI до учёта комиссий.
   grossRoiBeforeFees: number;
 
   // ROI после комиссий, до safety buffer.
   grossRoiAfterFees: number;
 
-  // ROI после комиссий + safety buffer.
+  // ROI после комиссий и safety buffer.
   netRoi: number;
 
   // Суммарная комиссия как доля от startAmount.
   totalFeeRate: number;
 
-  // Суммарная комиссия в единицах стартового ассета (USDC).
+  // Суммарная комиссия в единицах стартового ассета.
   totalFeeInStartAsset: number;
 
   expectedProfit: number;
-  legs: [SimulatedLeg, SimulatedLeg, SimulatedLeg];
+  legs: [
+    SimulatedLeg,
+    SimulatedLeg,
+    SimulatedLeg
+  ];
   detectedAt: Date;
 
-  // Для совместимости с ArbitrageRepository (alias на grossRoiAfterFees).
+  // Совместимость с ArbitrageRepository.
   grossRoi: number;
 }
