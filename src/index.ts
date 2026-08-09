@@ -21,22 +21,29 @@ import {
 } from './services/OrderExecutionService.js';
 
 const ALLOWED_ASSETS = new Set([
-  'USDC', 'USDT', 'BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'LTC', 'BCH', 'TRX',
-  'ADA', 'LINK', 'AVAX', 'DOT', 'TON', 'BNB', 'SUI', 'APT', 'NEAR', 'ATOM',
-  'FIL', 'ARB', 'OP', 'AAVE', 'UNI', 'ETC', 'XLM', 'HBAR', 'ICP', 'INJ', 'SEI',
-  'TIA', 'WLD', 'CRV', 'MKR', 'MATIC', 'POL', 'PEPE', 'SHIB', 'FLOKI', 'WIF',
-  'BONK', 'PENGU', 'JUP', 'KAS', 'RUNE', 'BOME', 'NOT', 'ORDI', 'PNUT', 'POPCAT',
-  'MEW', 'CHILLGUY', 'TAO', 'FET', 'GOAT', 'MYRO', 'NEIRO', 'THE', 'PONKE',
-  'TRUMP', 'MELANIA', 'PI', 'SAND', 'MANA', 'GRT', 'FTM', 'ALGO', 'VET', 'THETA',
-  'EGLD', 'AXS', 'FLOW', 'XTZ', 'KAVA', 'IOTA', 'ZIL', 'ICX', 'ENJ', 'CHZ',
-  'BAT', 'ZRX', 'LRC', 'CELO', 'ONE', 'QTUM', 'RVN', 'DASH', 'ZEC', 'XMR',
-  'SC', 'DGB', 'ONT', 'GALA', 'IMX', 'LDO', 'RPL', 'GMX', 'RNDR', 'AGIX',
-  'OCEAN', 'SXP', 'CFX', 'BEAM', 'STRK', 'PYTH', 'TNSR', 'JTO', 'SOMI', 'AKT',
-  'RENDER', 'VRA', 'RLC', 'TRAC', 'VIRTUAL', 'OLAS', 'KITE', 'NOS', 'PHB',
-  'U2U', 'CTX', 'QNT', 'MANTRA', 'REZ', 'DYM', 'METIS', 'PENDLE', 'PIXEL',
-  'PORTAL', 'ALT', 'MANTA', 'AEVO', 'ETHFI', 'ENA', 'SLERF', 'OMNI', 'REI',
-  'XAI', 'METAFI', 'RATS', '1000SATS', 'SATS', 'DEGEN', 'ACE', 'NFP', 'AI',
-  'BABYDOGE', 'LEASH', 'MX'
+  'USDC', 'USDT', 'BTC', 'ETH', 'SOL', 'XRP', 'DOGE',
+  'LTC', 'BCH', 'TRX', 'ADA', 'LINK', 'AVAX', 'DOT',
+  'TON', 'BNB', 'SUI', 'APT', 'NEAR', 'ATOM', 'FIL',
+  'ARB', 'OP', 'AAVE', 'UNI', 'ETC', 'XLM', 'HBAR',
+  'ICP', 'INJ', 'SEI', 'TIA', 'WLD', 'CRV', 'MKR',
+  'MATIC', 'POL', 'PEPE', 'SHIB', 'FLOKI', 'WIF',
+  'BONK', 'PENGU', 'JUP', 'KAS', 'RUNE', 'BOME',
+  'NOT', 'ORDI', 'PNUT', 'POPCAT', 'MEW', 'CHILLGUY',
+  'TAO', 'FET', 'GOAT', 'MYRO', 'NEIRO', 'THE', 'PONKE',
+  'TRUMP', 'MELANIA', 'PI', 'SAND', 'MANA', 'GRT',
+  'FTM', 'ALGO', 'VET', 'THETA', 'EGLD', 'AXS', 'FLOW',
+  'XTZ', 'KAVA', 'IOTA', 'ZIL', 'ICX', 'ENJ', 'CHZ',
+  'BAT', 'ZRX', 'LRC', 'CELO', 'ONE', 'QTUM', 'RVN',
+  'DASH', 'ZEC', 'XMR', 'SC', 'DGB', 'ONT', 'GALA',
+  'IMX', 'LDO', 'RPL', 'GMX', 'RNDR', 'AGIX', 'OCEAN',
+  'SXP', 'CFX', 'BEAM', 'STRK', 'PYTH', 'TNSR', 'JTO',
+  'SOMI', 'AKT', 'RENDER', 'VRA', 'RLC', 'TRAC',
+  'VIRTUAL', 'OLAS', 'KITE', 'NOS', 'PHB', 'U2U', 'CTX',
+  'QNT', 'MANTRA', 'REZ', 'DYM', 'METIS', 'PENDLE',
+  'PIXEL', 'PORTAL', 'ALT', 'MANTA', 'AEVO', 'ETHFI',
+  'ENA', 'SLERF', 'OMNI', 'REI', 'XAI', 'METAFI',
+  'RATS', '1000SATS', 'SATS', 'DEGEN', 'ACE', 'NFP',
+  'AI', 'BABYDOGE', 'LEASH', 'MX'
 ]);
 
 const MAX_TRIANGLES =
@@ -84,7 +91,7 @@ const sleep = (
 function extractSymbolFilters(
   exchangeInfo: any
 ): Map<string, SymbolFilter> {
-  const symbolFilters =
+  const result =
     new Map<string, SymbolFilter>();
 
   const symbols: any[] =
@@ -122,26 +129,23 @@ function extractSymbolFilters(
         symbolInfo.quoteAmountPrecision
       );
 
-    let stepSize: number;
-
-    if (
-      Number.isFinite(baseSizePrecision) &&
-      baseSizePrecision > 0
-    ) {
-      stepSize =
-        baseSizePrecision;
-    } else if (
+    /*
+     * baseAssetPrecision — точность количества.
+     * baseSizePrecision — минимальный размер ордера.
+     */
+    const stepSize =
       Number.isFinite(baseAssetPrecision) &&
       baseAssetPrecision >= 0
-    ) {
-      stepSize =
-        10 ** -baseAssetPrecision;
-    } else {
-      stepSize =
-        0.00000001;
-    }
+        ? 10 ** -baseAssetPrecision
+        : 0.00000001;
 
-    const safeQuoteScale =
+    const minQuantity =
+      Number.isFinite(baseSizePrecision) &&
+      baseSizePrecision > 0
+        ? baseSizePrecision
+        : 0;
+
+    const quoteScale =
       Number.isInteger(quotePrecision) &&
       quotePrecision >= 0 &&
       quotePrecision <= 20
@@ -154,18 +158,16 @@ function extractSymbolFilters(
         ? quoteAmountPrecision
         : 1;
 
-    const tickSize =
-      10 ** -safeQuoteScale;
-
-    symbolFilters.set(symbol, {
+    result.set(symbol, {
       stepSize,
-      tickSize,
+      minQuantity,
+      tickSize: 10 ** -quoteScale,
       minNotional,
-      quoteScale: safeQuoteScale
+      quoteScale
     });
   }
 
-  return symbolFilters;
+  return result;
 }
 
 async function loadSymbolFiltersForSymbols(
@@ -195,6 +197,7 @@ async function loadSymbolFiltersForSymbols(
 
     result.set(symbol, {
       stepSize: 1e-6,
+      minQuantity: 0,
       tickSize: 0.0001,
       minNotional: 1,
       quoteScale: 4
@@ -237,7 +240,7 @@ async function main(): Promise<void> {
       maxPaidLegs:
         MAX_PAID_LEGS
     },
-    'Starting USDC low-fee triangular arbitrage scanner'
+    'Starting USDC triangular arbitrage scanner'
   );
 
   const authenticatedClient =
@@ -284,16 +287,6 @@ async function main(): Promise<void> {
         )
     );
 
-  logger.info(
-    {
-      totalSymbols:
-        symbols.length,
-      totalLiquidSymbols:
-        liquidSymbols.length
-    },
-    'Filtered liquid symbols'
-  );
-
   const allTriangles =
     new TriangleBuilder().build(
       liquidSymbols,
@@ -306,60 +299,6 @@ async function main(): Promise<void> {
       0,
       MAX_TRIANGLES
     );
-
-  const directTriangles =
-    triangles.filter(
-      (triangle) =>
-        !triangle.isCrossRoute
-    );
-
-  const crossTriangles =
-    triangles.filter(
-      (triangle) =>
-        triangle.isCrossRoute
-    );
-
-  logger.info(
-    {
-      allTrianglesCount:
-        allTriangles.length,
-      directTrianglesCount:
-        directTriangles.length,
-      crossTrianglesCount:
-        crossTriangles.length,
-      selectedTrianglesCount:
-        triangles.length,
-      sampleDirectTriangles:
-        directTriangles.slice(0, 5).map(
-          (triangle) => ({
-            id: triangle.id,
-            legs: triangle.legs.map(
-              (leg) =>
-                `${leg.fromAsset}->` +
-                `${leg.toAsset}(` +
-                `${leg.symbol}:` +
-                `${leg.side})`
-            )
-          })
-        ),
-      sampleCrossTriangles:
-        crossTriangles.slice(0, 5).map(
-          (triangle) => ({
-            id: triangle.id,
-            crossAsset:
-              triangle.crossAsset,
-            legs: triangle.legs.map(
-              (leg) =>
-                `${leg.fromAsset}->` +
-                `${leg.toAsset}(` +
-                `${leg.symbol}:` +
-                `${leg.side})`
-            )
-          })
-        )
-    },
-    'Built USDC triangles'
-  );
 
   if (triangles.length === 0) {
     throw new Error(
@@ -387,17 +326,6 @@ async function main(): Promise<void> {
       candidateSymbols
     );
 
-  const zeroFeeSymbols =
-    [
-      ...takerFeesBySymbol.entries()
-    ]
-      .filter(
-        ([, feeRate]) =>
-          Math.abs(feeRate) <=
-          ZERO_FEE_EPSILON
-      )
-      .map(([symbol]) => symbol);
-
   const lowFeeTriangles =
     triangles.filter(
       (triangle) => {
@@ -424,17 +352,16 @@ async function main(): Promise<void> {
       }
     );
 
-  const lowFeeDirectTriangles =
-    lowFeeTriangles.filter(
-      (triangle) =>
-        !triangle.isCrossRoute
-    );
-
-  const lowFeeCrossTriangles =
-    lowFeeTriangles.filter(
-      (triangle) =>
-        triangle.isCrossRoute
-    );
+  const zeroFeeSymbols =
+    [
+      ...takerFeesBySymbol.entries()
+    ]
+      .filter(
+        ([, feeRate]) =>
+          Math.abs(feeRate) <=
+          ZERO_FEE_EPSILON
+      )
+      .map(([symbol]) => symbol);
 
   logger.info(
     {
@@ -447,13 +374,7 @@ async function main(): Promise<void> {
       candidateTrianglesCount:
         triangles.length,
       lowFeeTrianglesCount:
-        lowFeeTriangles.length,
-      lowFeeDirectTrianglesCount:
-        lowFeeDirectTriangles.length,
-      lowFeeCrossTrianglesCount:
-        lowFeeCrossTriangles.length,
-      maxPaidLegs:
-        MAX_PAID_LEGS
+        lowFeeTriangles.length
     },
     'Filtered USDC low-fee triangles'
   );
@@ -475,17 +396,6 @@ async function main(): Promise<void> {
         )
       )
     ];
-
-  logger.info(
-    {
-      selectedTriangles:
-        lowFeeTriangles.length,
-      subscribedPairs:
-        usedSymbols.length,
-      usedSymbols
-    },
-    'USDC low-fee scanner initialized'
-  );
 
   const symbolFilters =
     await loadSymbolFiltersForSymbols(
@@ -509,6 +419,8 @@ async function main(): Promise<void> {
               symbol,
               stepSize:
                 filter.stepSize,
+              minQuantity:
+                filter.minQuantity,
               tickSize:
                 filter.tickSize,
               minNotional:
@@ -590,23 +502,10 @@ async function main(): Promise<void> {
       )
     ];
 
-  logger.info(
-    {
-      requestedLowFeeTriangles:
-        lowFeeTriangles.length,
-      readyLowFeeTriangles:
-        readyTriangles.length,
-      loadedBooks:
-        books.size,
-      subscribedPairs:
-        readySymbols.length
-    },
-    'Order books initialized'
-  );
-
   const calculator =
     new ArbitrageCalculator(
-      takerFeesBySymbol
+      takerFeesBySymbol,
+      symbolFilters
     );
 
   const executionConfig:
@@ -620,6 +519,7 @@ async function main(): Promise<void> {
         config.trading.liveTrading,
       useMarketOrders: true,
       aggressivePriceRate: 0,
+      maxRoundingLossRate: 0.001,
       symbolFilters
     };
 
@@ -647,14 +547,6 @@ async function main(): Promise<void> {
         await csvWriter.write(
           opportunity,
           triangle
-        );
-
-        logger.info(
-          {
-            triangle:
-              opportunity.triangleId
-          },
-          'Opportunity found'
         );
 
         try {
