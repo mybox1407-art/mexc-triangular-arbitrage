@@ -28,6 +28,22 @@ export interface OrderExecutionConfig {
   symbolFilters?: Map<string, SymbolFilter>;
 }
 
+export type ExecutionStatus =
+  | 'FILLED_PROFITABLE'
+  | 'FILLED_UNPROFITABLE'
+  | 'PARTIAL'
+  | 'FAILED';
+
+export interface OrderFee {
+  amount: number;
+  asset: string;
+}
+
+export interface FeeSummary {
+  asset: string;
+  amount: number;
+}
+
 export interface OrderResult {
   success: boolean;
   orderId?: string;
@@ -36,6 +52,7 @@ export interface OrderResult {
   receivedQuantity?: number;
   executedPrice?: number;
   executedQuoteQty?: number;
+  fees?: OrderFee[];
   timestamp: number;
   isMarketOrder?: boolean;
 }
@@ -45,12 +62,11 @@ export interface ExecutionReport {
   orders: OrderResult[];
   totalProfitUsdt: number;
   totalFeesUsdt: number;
+  feesByAsset: FeeSummary[];
+  feesAreActual: boolean;
+  actualRoi: number;
   executionTimeMs: number;
-  status:
-    | 'executed'
-    | 'partial'
-    | 'failed'
-    | 'cancelled';
+  status: ExecutionStatus;
   actualFinalAmount?: number;
   profitIsActual?: boolean;
 }
@@ -109,46 +125,6 @@ export class OrderExecutionService {
     };
   }
 
-  private getBestBid(symbol: string): number {
-    const book = this.orderBooks.get(symbol);
-
-    if (!book) {
-      throw new Error(
-        `Order book not found for ${symbol}`
-      );
-    }
-
-    const snapshot = book.getSnapshot(5);
-
-    if (snapshot.bids.length === 0) {
-      throw new Error(
-        `No bids for ${symbol}`
-      );
-    }
-
-    return snapshot.bids[0].price;
-  }
-
-  private getBestAsk(symbol: string): number {
-    const book = this.orderBooks.get(symbol);
-
-    if (!book) {
-      throw new Error(
-        `Order book not found for ${symbol}`
-      );
-    }
-
-    const snapshot = book.getSnapshot(5);
-
-    if (snapshot.asks.length === 0) {
-      throw new Error(
-        `No asks for ${symbol}`
-      );
-    }
-
-    return snapshot.asks[0].price;
-  }
-
   async executeArbitrage(
     opportunity: Opportunity
   ): Promise<ExecutionReport> {
@@ -157,14 +133,13 @@ export class OrderExecutionService {
 
     if (!this.config.enabled) {
       console.log(
-        '[EXEC] CANCELLED: trading disabled'
+        '[EXEC] FAILED: trading disabled'
       );
 
       return this.createReport(
         opportunity,
         orders,
-        startTime,
-        'cancelled'
+        startTime
       );
     }
 
@@ -176,7 +151,7 @@ export class OrderExecutionService {
       expectedProfit < this.config.minProfitUsdt
     ) {
       console.log(
-        `[EXEC] CANCELLED: invalid or insufficient profit ` +
+        `[EXEC] FAILED: invalid or insufficient profit ` +
         `profit=${expectedProfit}, ` +
         `min=${this.config.minProfitUsdt}`
       );
@@ -184,8 +159,7 @@ export class OrderExecutionService {
       return this.createReport(
         opportunity,
         orders,
-        startTime,
-        'cancelled'
+        startTime
       );
     }
 
@@ -197,15 +171,14 @@ export class OrderExecutionService {
       opportunity.startAmount < minNotional
     ) {
       console.log(
-        `[EXEC] CANCELLED: invalid start amount ` +
+        `[EXEC] FAILED: invalid start amount ` +
         `${opportunity.startAmount}`
       );
 
       return this.createReport(
         opportunity,
         orders,
-        startTime,
-        'cancelled'
+        startTime
       );
     }
 
@@ -226,11 +199,12 @@ export class OrderExecutionService {
     );
 
     try {
-      const order1 = await this.executeLeg(
-        0,
-        opportunity,
-        opportunity.startAmount
-      );
+      const order1 =
+        await this.executeLeg(
+          0,
+          opportunity,
+          opportunity.startAmount
+        );
 
       orders.push(order1);
 
@@ -242,19 +216,22 @@ export class OrderExecutionService {
         return this.createReport(
           opportunity,
           orders,
-          startTime,
-          'failed'
+          startTime
         );
       }
 
       const input2 =
-        this.resolveNextInput(order1, 'step1');
+        this.resolveNextInput(
+          order1,
+          'step1'
+        );
 
-      const order2 = await this.executeLeg(
-        1,
-        opportunity,
-        input2
-      );
+      const order2 =
+        await this.executeLeg(
+          1,
+          opportunity,
+          input2
+        );
 
       orders.push(order2);
 
@@ -271,19 +248,22 @@ export class OrderExecutionService {
         return this.createReport(
           opportunity,
           orders,
-          startTime,
-          'partial'
+          startTime
         );
       }
 
       const input3 =
-        this.resolveNextInput(order2, 'step2');
+        this.resolveNextInput(
+          order2,
+          'step2'
+        );
 
-      const order3 = await this.executeLeg(
-        2,
-        opportunity,
-        input3
-      );
+      const order3 =
+        await this.executeLeg(
+          2,
+          opportunity,
+          input3
+        );
 
       orders.push(order3);
 
@@ -300,8 +280,7 @@ export class OrderExecutionService {
         return this.createReport(
           opportunity,
           orders,
-          startTime,
-          'partial'
+          startTime
         );
       }
 
@@ -315,26 +294,23 @@ export class OrderExecutionService {
         console.error(
           '[EXEC] Final invariant failed'
         );
-
-        return this.createReport(
-          opportunity,
-          orders,
-          startTime,
-          'partial'
-        );
       }
 
+      const report =
+        this.createReport(
+          opportunity,
+          orders,
+          startTime
+        );
+
       console.log(
-        `[EXEC] Arbitrage completed successfully: ` +
-        `${opportunity.triangleId}`
+        `[EXEC] ${report.status}: ` +
+        `${opportunity.triangleId}, ` +
+        `profit=${report.totalProfitUsdt}, ` +
+        `roi=${(report.actualRoi * 100).toFixed(4)}%`
       );
 
-      return this.createReport(
-        opportunity,
-        orders,
-        startTime,
-        'executed'
-      );
+      return report;
     } catch (error) {
       const message =
         error instanceof Error
@@ -348,8 +324,7 @@ export class OrderExecutionService {
       return this.createReport(
         opportunity,
         orders,
-        startTime,
-        'failed'
+        startTime
       );
     }
   }
@@ -447,8 +422,9 @@ export class OrderExecutionService {
     }
 
     return Number(
-      (Math.floor(value / step) * step)
-        .toFixed(12)
+      (
+        Math.floor(value / step) * step
+      ).toFixed(12)
     );
   }
 
@@ -457,7 +433,9 @@ export class OrderExecutionService {
     quantity: number
   ): number {
     const filter =
-      this.config.symbolFilters?.get(symbol);
+      this.config.symbolFilters?.get(
+        symbol.toUpperCase()
+      );
 
     if (
       filter &&
@@ -476,9 +454,10 @@ export class OrderExecutionService {
     const factor =
       10 ** precision;
 
-    return Math.floor(
-      quantity * factor
-    ) / factor;
+    return (
+      Math.floor(quantity * factor) /
+      factor
+    );
   }
 
   private roundPrice(
@@ -486,7 +465,9 @@ export class OrderExecutionService {
     price: number
   ): number {
     const filter =
-      this.config.symbolFilters?.get(symbol);
+      this.config.symbolFilters?.get(
+        symbol.toUpperCase()
+      );
 
     if (
       filter &&
@@ -494,14 +475,20 @@ export class OrderExecutionService {
       filter.tickSize > 0
     ) {
       return Number(
-        (Math.round(price / filter.tickSize) * filter.tickSize)
-          .toFixed(12)
+        (
+          Math.round(
+            price / filter.tickSize
+          ) * filter.tickSize
+        ).toFixed(12)
       );
     }
 
-    // Fallback: 8 знаков
     const factor = 10 ** 8;
-    return Math.round(price * factor) / factor;
+
+    return (
+      Math.round(price * factor) /
+      factor
+    );
   }
 
   private roundQuoteQty(
@@ -509,20 +496,30 @@ export class OrderExecutionService {
     quoteQty: number
   ): number {
     const filter =
-      this.config.symbolFilters?.get(symbol);
+      this.config.symbolFilters?.get(
+        symbol.toUpperCase()
+      );
 
     if (
       filter &&
       Number.isFinite(filter.quoteScale) &&
       filter.quoteScale >= 0
     ) {
-      const factor = 10 ** filter.quoteScale;
-      return Math.floor(quoteQty * factor) / factor;
+      const factor =
+        10 ** filter.quoteScale;
+
+      return (
+        Math.floor(quoteQty * factor) /
+        factor
+      );
     }
 
-    // Fallback: 4 знака
     const factor = 10 ** 4;
-    return Math.floor(quoteQty * factor) / factor;
+
+    return (
+      Math.floor(quoteQty * factor) /
+      factor
+    );
   }
 
   private async placeOrder(
@@ -541,18 +538,14 @@ export class OrderExecutionService {
             ? 'MARKET'
             : 'LIMIT';
 
-        let quantity: number | undefined;
-        let price: number | undefined;
+        let quantity:
+          | number
+          | undefined;
 
-        /*
-         * MARKET BUY:
-         *
-         * inputAmount = quote amount.
-         * Example: 10 USDT.
-         *
-         * The MEXC request uses quoteOrderQty,
-         * not quantity.
-         */
+        let price:
+          | number
+          | undefined;
+
         if (
           side === 'BUY' &&
           orderType === 'MARKET'
@@ -570,12 +563,24 @@ export class OrderExecutionService {
             };
           }
 
-          const sanitizedQuoteQty = this.roundQuoteQty(symbol, inputAmount);
+          const sanitizedQuoteQty =
+            this.roundQuoteQty(
+              symbol,
+              inputAmount
+            );
 
-          const filter = this.config.symbolFilters?.get(symbol);
-          const quoteScale = filter?.quoteScale ?? 4;
+          const filter =
+            this.config.symbolFilters?.get(
+              symbol.toUpperCase()
+            );
 
-          const quoteOrderQty = sanitizedQuoteQty.toFixed(quoteScale);
+          const quoteScale =
+            filter?.quoteScale ?? 4;
+
+          const quoteOrderQty =
+            sanitizedQuoteQty.toFixed(
+              quoteScale
+            );
 
           console.log(
             '[ORDER REQUEST]',
@@ -603,17 +608,19 @@ export class OrderExecutionService {
           );
         }
 
-        /*
-         * LIMIT BUY:
-         * inputAmount is quote amount,
-         * quantity is calculated base amount.
-         */
         if (side === 'BUY') {
           price =
             this.getBestAsk(symbol) *
-            (1 + this.config.aggressivePriceRate);
+            (
+              1 +
+              this.config.aggressivePriceRate
+            );
 
-          price = this.roundPrice(symbol, price);
+          price =
+            this.roundPrice(
+              symbol,
+              price
+            );
 
           quantity =
             this.roundQuantity(
@@ -621,10 +628,6 @@ export class OrderExecutionService {
               inputAmount / price
             );
         } else {
-          /*
-           * SELL:
-           * inputAmount is base amount.
-           */
           quantity =
             this.roundQuantity(
               symbol,
@@ -634,9 +637,16 @@ export class OrderExecutionService {
           if (orderType === 'LIMIT') {
             price =
               this.getBestBid(symbol) *
-              (1 - this.config.aggressivePriceRate);
+              (
+                1 -
+                this.config.aggressivePriceRate
+              );
 
-            price = this.roundPrice(symbol, price);
+            price =
+              this.roundPrice(
+                symbol,
+                price
+              );
           }
         }
 
@@ -652,7 +662,10 @@ export class OrderExecutionService {
 
         if (
           price !== undefined &&
-          (!Number.isFinite(price) || price <= 0)
+          (
+            !Number.isFinite(price) ||
+            price <= 0
+          )
         ) {
           throw new Error(
             `Invalid price for ${symbol}: ${price}`
@@ -661,11 +674,14 @@ export class OrderExecutionService {
 
         const notional =
           side === 'SELL'
-            ? quantity * this.getBestBid(symbol)
+            ? quantity *
+              this.getBestBid(symbol)
             : inputAmount;
 
         const filter =
-          this.config.symbolFilters?.get(symbol);
+          this.config.symbolFilters?.get(
+            symbol.toUpperCase()
+          );
 
         const minNotional =
           filter?.minNotional ??
@@ -772,11 +788,50 @@ export class OrderExecutionService {
     }
   }
 
+  private async loadOrderFees(
+    orderId: string,
+    symbol: string
+  ): Promise<OrderFee[]> {
+    try {
+      const trades =
+        await this.client.getMyTrades(
+          symbol,
+          orderId
+        );
+
+      return trades
+        .map((trade) => ({
+          amount: Number(
+            trade.commission
+          ),
+          asset: String(
+            trade.commissionAsset
+          ).toUpperCase()
+        }))
+        .filter(
+          (fee) =>
+            Number.isFinite(fee.amount) &&
+            fee.amount > 0 &&
+            fee.asset.length > 0
+        );
+    } catch (error) {
+      console.error(
+        `[FEE] Failed to load fees for ${orderId}:`,
+        error instanceof Error
+          ? error.message
+          : String(error)
+      );
+
+      return [];
+    }
+  }
+
   private isNonRetryable(
     message: string
   ): boolean {
     return NON_RETRYABLE_PATTERNS.some(
-      (pattern) => message.includes(pattern)
+      (pattern) =>
+        message.includes(pattern)
     );
   }
 
@@ -825,20 +880,24 @@ export class OrderExecutionService {
             raw.cumulativeQuoteQty
           );
 
-        let avgPrice =
+        const reportedAvgPrice =
           this.parseNumber(
             raw.avgPrice ??
             raw.price
           );
 
-        if (
-          !Number.isFinite(avgPrice) &&
+        const calculatedAvgPrice =
           executedQty > 0 &&
           quoteQty > 0
-        ) {
-          avgPrice =
-            quoteQty / executedQty;
-        }
+            ? quoteQty / executedQty
+            : NaN;
+
+        const avgPrice =
+          Number.isFinite(
+            calculatedAvgPrice
+          )
+            ? calculatedAvgPrice
+            : reportedAvgPrice;
 
         console.log(
           `[STATUS] ${orderId}: ${raw.status} ` +
@@ -868,6 +927,12 @@ export class OrderExecutionService {
               ? executedQty
               : quoteQty;
 
+          const fees =
+            await this.loadOrderFees(
+              orderId,
+              symbol
+            );
+
           return {
             success: true,
             orderId,
@@ -875,6 +940,7 @@ export class OrderExecutionService {
             receivedQuantity: received,
             executedPrice: avgPrice,
             executedQuoteQty: quoteQty,
+            fees,
             timestamp: Date.now(),
             isMarketOrder:
               this.config.useMarketOrders
@@ -899,6 +965,17 @@ export class OrderExecutionService {
           raw.status === 'PARTIALLY_FILLED' ||
           raw.status === 'PARTIALLY_CANCELED'
         ) {
+          const fees =
+            await this.loadOrderFees(
+              orderId,
+              symbol
+            );
+
+          await this.attemptCancel(
+            orderId,
+            symbol
+          );
+
           return {
             success: false,
             orderId,
@@ -912,6 +989,7 @@ export class OrderExecutionService {
                 : quoteQty,
             executedPrice: avgPrice,
             executedQuoteQty: quoteQty,
+            fees,
             error:
               `Order ${raw.status}`,
             timestamp: Date.now()
@@ -950,21 +1028,17 @@ export class OrderExecutionService {
     opportunity: Opportunity,
     lastOrder: OrderResult
   ): boolean {
-    const expectedFinal = (
-      opportunity as Opportunity & {
-        finalAmount?: number;
-      }
-    ).finalAmount;
+    const expectedFinal =
+      opportunity.finalAmount;
 
     const actualFinal =
       lastOrder.receivedQuantity;
 
     if (
-      expectedFinal === undefined ||
-      actualFinal === undefined ||
       !Number.isFinite(expectedFinal) ||
       !Number.isFinite(actualFinal) ||
       expectedFinal <= 0 ||
+      actualFinal === undefined ||
       actualFinal <= 0
     ) {
       console.error(
@@ -975,11 +1049,13 @@ export class OrderExecutionService {
     }
 
     const deviation =
-      Math.abs(actualFinal - expectedFinal) /
-      expectedFinal;
+      Math.abs(
+        actualFinal - expectedFinal
+      ) / expectedFinal;
 
     const maxDeviation =
-      this.config.maxExecutionDeviationRate ?? 0.02;
+      this.config.maxExecutionDeviationRate ??
+      0.02;
 
     console.log(
       `[INVARIANT] expected=${expectedFinal}, ` +
@@ -998,6 +1074,35 @@ export class OrderExecutionService {
     }
 
     return true;
+  }
+
+  private summarizeFees(
+    orders: OrderResult[]
+  ): FeeSummary[] {
+    const totals =
+      new Map<string, number>();
+
+    for (const order of orders) {
+      for (const fee of order.fees ?? []) {
+        const asset =
+          fee.asset.toUpperCase();
+
+        totals.set(
+          asset,
+          (totals.get(asset) ?? 0) +
+          fee.amount
+        );
+      }
+    }
+
+    return [...totals.entries()]
+      .map(([asset, amount]) => ({
+        asset,
+        amount
+      }))
+      .sort((a, b) =>
+        a.asset.localeCompare(b.asset)
+      );
   }
 
   private logResidualPosition(
@@ -1040,56 +1145,137 @@ export class OrderExecutionService {
   private createReport(
     opportunity: Opportunity,
     orders: OrderResult[],
-    startTime: number,
-    status:
-      | 'executed'
-      | 'partial'
-      | 'failed'
-      | 'cancelled'
+    startTime: number
   ): ExecutionReport {
-    const fullyExecuted =
-      status === 'executed' &&
+    const allOrdersFilled =
       orders.length === 3 &&
       orders.every(
         (order) => order.success
       );
 
+    const hasPartialExecution =
+      orders.some(
+        (order) =>
+          order.success ||
+          (
+            order.filledQuantity !==
+              undefined &&
+            order.filledQuantity > 0
+          )
+      );
+
     const actualFinal =
-      fullyExecuted
+      allOrdersFilled
         ? orders[2]?.receivedQuantity
         : undefined;
 
     const actualProfit =
-      fullyExecuted &&
       actualFinal !== undefined &&
       Number.isFinite(actualFinal)
         ? actualFinal -
           opportunity.startAmount
         : 0;
 
+    const actualRoi =
+      opportunity.startAmount > 0
+        ? actualProfit /
+          opportunity.startAmount
+        : 0;
+
+    const feesByAsset =
+      this.summarizeFees(orders);
+
+    const status: ExecutionStatus =
+      allOrdersFilled
+        ? actualProfit > 0
+          ? 'FILLED_PROFITABLE'
+          : 'FILLED_UNPROFITABLE'
+        : hasPartialExecution
+          ? 'PARTIAL'
+          : 'FAILED';
+
     return {
       opportunity,
       orders,
       totalProfitUsdt: actualProfit,
+
+      // Комиссии могут быть в MX, THE, USDT и т.д.
+      // Поэтому это поле не используется для смешанных валют.
       totalFeesUsdt: 0,
+
+      feesByAsset,
+      feesAreActual:
+        feesByAsset.length > 0,
+      actualRoi,
       executionTimeMs:
         Date.now() - startTime,
       status,
       actualFinalAmount: actualFinal,
-      profitIsActual: fullyExecuted
+      profitIsActual:
+        actualFinal !== undefined
     };
+  }
+
+  private getBestBid(
+    symbol: string
+  ): number {
+    const book =
+      this.orderBooks.get(symbol);
+
+    if (!book) {
+      throw new Error(
+        `Order book not found for ${symbol}`
+      );
+    }
+
+    const snapshot =
+      book.getSnapshot(5);
+
+    if (snapshot.bids.length === 0) {
+      throw new Error(
+        `No bids for ${symbol}`
+      );
+    }
+
+    return snapshot.bids[0].price;
+  }
+
+  private getBestAsk(
+    symbol: string
+  ): number {
+    const book =
+      this.orderBooks.get(symbol);
+
+    if (!book) {
+      throw new Error(
+        `Order book not found for ${symbol}`
+      );
+    }
+
+    const snapshot =
+      book.getSnapshot(5);
+
+    if (snapshot.asks.length === 0) {
+      throw new Error(
+        `No asks for ${symbol}`
+      );
+    }
+
+    return snapshot.asks[0].price;
   }
 
   private sleep(
     milliseconds: number
   ): Promise<void> {
     return new Promise(
-      (resolve) => setTimeout(resolve, milliseconds)
+      (resolve) =>
+        setTimeout(resolve, milliseconds)
     );
   }
 
   enable(): void {
     this.config.enabled = true;
+
     console.log(
       '[EXEC] Trading ENABLED'
     );
@@ -1097,6 +1283,7 @@ export class OrderExecutionService {
 
   disable(): void {
     this.config.enabled = false;
+
     console.log(
       '[EXEC] Trading DISABLED'
     );
@@ -1104,13 +1291,13 @@ export class OrderExecutionService {
 
   async cancelAllActiveOrders(): Promise<void> {
     const cancellations =
-      [...this.activeOrders.values()].map(
-        (order) =>
+      [...this.activeOrders.values()]
+        .map((order) =>
           this.attemptCancel(
             order.orderId,
             order.symbol
           )
-      );
+        );
 
     await Promise.all(cancellations);
     this.activeOrders.clear();
