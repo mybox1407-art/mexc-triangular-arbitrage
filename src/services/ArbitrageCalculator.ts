@@ -163,27 +163,35 @@ export class ArbitrageCalculator {
         return null;
       }
 
-      const result =
-        leg.side === 'BUY'
-          ? this.buyWithQuote(
-              leg.symbol,
-              snapshot.asks,
-              amountBeforeFeesOnly
-            )
-          : this.sellBase(
-              leg.symbol,
-              snapshot.bids,
-              amountBeforeFeesOnly
-            );
+      if (leg.side === 'BUY') {
+        const result =
+          this.buyWithQuote(
+            leg.symbol,
+            snapshot.asks,
+            amountBeforeFeesOnly
+          );
 
-      if (!result) {
-        return null;
+        if (!result) {
+          return null;
+        }
+
+        amountBeforeFeesOnly =
+          result.baseAmount;
+      } else {
+        const result =
+          this.sellBase(
+            leg.symbol,
+            snapshot.bids,
+            amountBeforeFeesOnly
+          );
+
+        if (!result) {
+          return null;
+        }
+
+        amountBeforeFeesOnly =
+          result.quoteReceived;
       }
-
-      amountBeforeFeesOnly =
-        leg.side === 'BUY'
-          ? result.baseAmount
-          : result.quoteReceived;
     }
 
     const grossRoiBeforeFees =
@@ -242,14 +250,6 @@ export class ArbitrageCalculator {
     ) {
       return null;
     }
-
-    const maxLevelsUsed =
-      Math.max(
-        ...simulatedLegs.map(
-          (leg) =>
-            leg.levelsUsed
-        )
-      );
 
     return {
       triangleId: triangle.id,
