@@ -7,9 +7,14 @@ import type {
   Triangle,
   TriangleLeg
 } from '../domain/types.js';
+import type {
+  SymbolFilter
+} from './OrderExecutionService.js';
 import pino from 'pino';
 
-const logger = pino({ level: config.logLevel });
+const logger = pino({
+  level: config.logLevel
+});
 
 type BookSnapshotLike = {
   symbol: string;
@@ -19,9 +24,26 @@ type BookSnapshotLike = {
   updatedAt: number;
 };
 
+type BuyExecution = {
+  baseAmount: number;
+  quoteSpent: number;
+  levelsUsed: number;
+};
+
+type SellExecution = {
+  quoteReceived: number;
+  levelsUsed: number;
+};
+
 export class ArbitrageCalculator {
+  private readonly maxRoundingLossRate =
+    0.001;
+
   constructor(
-    private readonly takerFeesBySymbol = new Map<string, number>()
+    private readonly takerFeesBySymbol =
+      new Map<string, number>(),
+    private readonly symbolFilters =
+      new Map<string, SymbolFilter>()
   ) {}
 
   simulate(
@@ -29,22 +51,30 @@ export class ArbitrageCalculator {
     books: Map<string, OrderBook>,
     startAmount: number
   ): Opportunity | null {
-    const snapshots = new Map<string, BookSnapshotLike>();
+    const snapshots =
+      new Map<string, BookSnapshotLike>();
 
     for (const leg of triangle.legs) {
-      const book = books.get(leg.symbol);
+      const book =
+        books.get(leg.symbol);
+
       if (!book) {
         return null;
       }
 
-      const snapshot = book.getSnapshot(100);
-      snapshots.set(leg.symbol, {
-        symbol: snapshot.symbol,
-        bids: snapshot.bids,
-        asks: snapshot.asks,
-        ready: snapshot.ready,
-        updatedAt: snapshot.updatedAt
-      });
+      const snapshot =
+        book.getSnapshot(100);
+
+      snapshots.set(
+        leg.symbol,
+        {
+          symbol: snapshot.symbol,
+          bids: snapshot.bids,
+          asks: snapshot.asks,
+          ready: snapshot.ready,
+          updatedAt: snapshot.updatedAt
+        }
+      );
     }
 
     return this.simulateFromSnapshots(
@@ -59,111 +89,198 @@ export class ArbitrageCalculator {
     snapshots: Map<string, BookSnapshotLike>,
     startAmount: number
   ): Opportunity | null {
-    let amountBeforeFees = startAmount;
-
-    for (const leg of triangle.legs) {
-      const snapshot = snapshots.get(leg.symbol);
-      if (!snapshot || !snapshot.ready) {
-        return null;
-      }
-
-      if (leg.side === 'BUY') {
-        const exec = this.buyWithQuote(snapshot.asks, amountBeforeFees);
-        if (!exec) {
-          return null;
-        }
-        amountBeforeFees = exec.baseAmount;
-      } else {
-        const exec = this.sellBase(snapshot.bids, amountBeforeFees);
-        if (!exec) {
-          return null;
-        }
-        amountBeforeFees = exec.quoteReceived;
-      }
+    if (
+      !Number.isFinite(startAmount) ||
+      startAmount <= 0
+    ) {
+      return null;
     }
 
-    const finalAmountBeforeFees = amountBeforeFees;
-    const grossRoiBeforeFees =
-      (finalAmountBeforeFees - startAmount) / startAmount;
-
-    let amountAfterFees = startAmount;
-    const simulatedLegs: SimulatedLeg[] = [];
+    let amountBeforeFees =
+      startAmount;
 
     for (const leg of triangle.legs) {
-      const snapshot = snapshots.get(leg.symbol);
-      if (!snapshot || !snapshot.ready) {
+      const snapshot =
+        snapshots.get(leg.symbol);
+
+      if (
+        !snapshot ||
+        !snapshot.ready
+      ) {
         return null;
       }
 
-      const feeRate = this.getTakerFeeRate(leg.symbol);
+      const feeRate =
+        this.getTakerFeeRate(
+          leg.symbol
+        );
 
-      const result = this.simulateLeg(
-        leg,
-        snapshot.bids,
-        snapshot.asks,
-        amountAfterFees,
-        feeRate
-      );
+      const result =
+        this.simulateLeg(
+          leg,
+          snapshot.bids,
+          snapshot.asks,
+          amountBeforeFees,
+          feeRate
+        );
 
       if (!result) {
         return null;
       }
 
-      amountAfterFees = result.outputAmount;
-      simulatedLegs.push(result);
+      amountBeforeFees =
+        result.outputAmount;
     }
 
-    if (simulatedLegs.length !== 3) {
+    const finalAmount =
+      amountBeforeFees;
+
+    const grossRoiAfterFees =
+      (
+        finalAmount -
+        startAmount
+      ) / startAmount;
+
+    const netRoi =
+      grossRoiAfterFees -
+      config.trading.safetyBufferRate;
+
+    if (
+      !Number.isFinite(finalAmount) ||
+      finalAmount <= 0
+    ) {
       return null;
     }
 
-    const finalAmountAfterFees = amountAfterFees;
-    const grossRoiAfterFees =
-      (finalAmountAfterFees - startAmount) / startAmount;
+    let amountBeforeFeesOnly =
+      startAmount;
 
-    const netRoi =
-      grossRoiAfterFees - config.trading.safetyBufferRate;
+    for (const leg of triangle.legs) {
+      const snapshot =
+        snapshots.get(leg.symbol);
 
-    const totalFeeRate = grossRoiBeforeFees - grossRoiAfterFees;
-    const totalFeeInStartAsset = totalFeeRate * startAmount;
+      if (!snapshot) {
+        return null;
+      }
 
-    const maxLevelsUsed = Math.max(
-      ...simulatedLegs.map((leg) => leg.levelsUsed)
-    );
-    const levelsPerLeg = simulatedLegs.map((leg) => leg.levelsUsed);
+      const result =
+        leg.side === 'BUY'
+          ? this.buyWithQuote(
+              leg.symbol,
+              snapshot.asks,
+              amountBeforeFeesOnly
+            )
+          : this.sellBase(
+              leg.symbol,
+              snapshot.bids,
+              amountBeforeFeesOnly
+            );
 
-    //logger.info(
-    //  {
-    //    triangleId: triangle.id,
-    //    maxLevelsUsed,
-    //    levelsPerLeg,
-    //    grossRoiBeforeFees,
-    //    grossRoiAfterFees,
-    //    netRoi,
-    //    totalFeeRate
-    //  },
-    //  'Simulated triangle'
-    //);
+      if (!result) {
+        return null;
+      }
+
+      amountBeforeFeesOnly =
+        leg.side === 'BUY'
+          ? result.baseAmount
+          : result.quoteReceived;
+    }
+
+    const grossRoiBeforeFees =
+      (
+        amountBeforeFeesOnly -
+        startAmount
+      ) / startAmount;
+
+    const totalFeeRate =
+      grossRoiBeforeFees -
+      grossRoiAfterFees;
+
+    const totalFeeInStartAsset =
+      totalFeeRate * startAmount;
+
+    const simulatedLegs: SimulatedLeg[] =
+      [];
+
+    let amountAfterFees =
+      startAmount;
+
+    for (const leg of triangle.legs) {
+      const snapshot =
+        snapshots.get(leg.symbol);
+
+      if (!snapshot) {
+        return null;
+      }
+
+      const feeRate =
+        this.getTakerFeeRate(
+          leg.symbol
+        );
+
+      const result =
+        this.simulateLeg(
+          leg,
+          snapshot.bids,
+          snapshot.asks,
+          amountAfterFees,
+          feeRate
+        );
+
+      if (!result) {
+        return null;
+      }
+
+      amountAfterFees =
+        result.outputAmount;
+
+      simulatedLegs.push(result);
+    }
+
+    if (
+      simulatedLegs.length !== 3
+    ) {
+      return null;
+    }
+
+    const maxLevelsUsed =
+      Math.max(
+        ...simulatedLegs.map(
+          (leg) =>
+            leg.levelsUsed
+        )
+      );
 
     return {
       triangleId: triangle.id,
       startAsset: triangle.startAsset,
       startAmount,
-      finalAmount: finalAmountAfterFees,
+      finalAmount,
       grossRoiBeforeFees,
       grossRoiAfterFees,
       netRoi,
       totalFeeRate,
       totalFeeInStartAsset,
-      expectedProfit: finalAmountAfterFees - startAmount,
-      legs: simulatedLegs as [SimulatedLeg, SimulatedLeg, SimulatedLeg],
+      expectedProfit:
+        finalAmount - startAmount,
+      legs:
+        simulatedLegs as [
+          SimulatedLeg,
+          SimulatedLeg,
+          SimulatedLeg
+        ],
       detectedAt: new Date(),
       grossRoi: grossRoiAfterFees
     };
   }
 
-  private getTakerFeeRate(symbol: string): number {
-    const feeRate = this.takerFeesBySymbol.get(symbol.toUpperCase());
+  private getTakerFeeRate(
+    symbol: string
+  ): number {
+    const feeRate =
+      this.takerFeesBySymbol.get(
+        symbol.toUpperCase()
+      );
 
     if (
       feeRate === undefined ||
@@ -176,6 +293,158 @@ export class ArbitrageCalculator {
     return feeRate;
   }
 
+  private getFilter(
+    symbol: string
+  ): SymbolFilter | undefined {
+    return this.symbolFilters.get(
+      symbol.toUpperCase()
+    );
+  }
+
+  private floorToStep(
+    value: number,
+    step: number
+  ): number {
+    if (
+      !Number.isFinite(step) ||
+      step <= 0
+    ) {
+      return value;
+    }
+
+    return Number(
+      (
+        Math.floor(value / step) *
+        step
+      ).toFixed(12)
+    );
+  }
+
+  private roundBaseAmount(
+    symbol: string,
+    amount: number
+  ): number | null {
+    const filter =
+      this.getFilter(symbol);
+
+    if (!filter) {
+      return amount;
+    }
+
+    const rounded =
+      this.floorToStep(
+        amount,
+        filter.stepSize
+      );
+
+    if (
+      !Number.isFinite(rounded) ||
+      rounded <= 0
+    ) {
+      return null;
+    }
+
+    if (
+      filter.minQuantity > 0 &&
+      rounded < filter.minQuantity
+    ) {
+      return null;
+    }
+
+    const lossRate =
+      amount > 0
+        ? (amount - rounded) /
+          amount
+        : 0;
+
+    if (
+      lossRate >
+      this.maxRoundingLossRate
+    ) {
+      logger.debug(
+        {
+          symbol,
+          amount,
+          rounded,
+          lossRate
+        },
+        'Skipping opportunity because base rounding loss is too high'
+      );
+
+      return null;
+    }
+
+    return rounded;
+  }
+
+  private roundQuoteAmount(
+    symbol: string,
+    amount: number
+  ): number | null {
+    const filter =
+      this.getFilter(symbol);
+
+    if (!filter) {
+      return amount;
+    }
+
+    if (
+      filter.quoteScale < 0 ||
+      !Number.isInteger(
+        filter.quoteScale
+      )
+    ) {
+      return amount;
+    }
+
+    const factor =
+      10 ** filter.quoteScale;
+
+    const rounded =
+      Math.floor(
+        amount * factor
+      ) / factor;
+
+    if (
+      !Number.isFinite(rounded) ||
+      rounded <= 0
+    ) {
+      return null;
+    }
+
+    const lossRate =
+      amount > 0
+        ? (amount - rounded) /
+          amount
+        : 0;
+
+    if (
+      lossRate >
+      this.maxRoundingLossRate
+    ) {
+      logger.debug(
+        {
+          symbol,
+          amount,
+          rounded,
+          lossRate
+        },
+        'Skipping opportunity because quote rounding loss is too high'
+      );
+
+      return null;
+    }
+
+    if (
+      filter.minNotional > 0 &&
+      rounded < filter.minNotional
+    ) {
+      return null;
+    }
+
+    return rounded;
+  }
+
   private simulateLeg(
     leg: TriangleLeg,
     bids: BookLevel[],
@@ -184,15 +453,29 @@ export class ArbitrageCalculator {
     feeRate: number
   ): SimulatedLeg | null {
     if (leg.side === 'BUY') {
-      const execution = this.buyWithQuote(asks, inputAmount);
+      const execution =
+        this.buyWithQuote(
+          leg.symbol,
+          asks,
+          inputAmount
+        );
+
       if (!execution) {
         return null;
       }
 
-      const feePaidInOutput = execution.baseAmount * feeRate;
-      const outputAmount = execution.baseAmount - feePaidInOutput;
+      const feePaidInOutput =
+        execution.baseAmount *
+        feeRate;
 
-      if (!Number.isFinite(outputAmount) || outputAmount <= 0) {
+      const outputAmount =
+        execution.baseAmount -
+        feePaidInOutput;
+
+      if (
+        !Number.isFinite(outputAmount) ||
+        outputAmount <= 0
+      ) {
         return null;
       }
 
@@ -203,21 +486,38 @@ export class ArbitrageCalculator {
         toAsset: leg.toAsset,
         inputAmount,
         outputAmount,
-        vwap: execution.quoteSpent / execution.baseAmount,
+        vwap:
+          execution.quoteSpent /
+          execution.baseAmount,
         feePaidInOutput,
-        levelsUsed: execution.levelsUsed
+        levelsUsed:
+          execution.levelsUsed
       };
     }
 
-    const execution = this.sellBase(bids, inputAmount);
+    const execution =
+      this.sellBase(
+        leg.symbol,
+        bids,
+        inputAmount
+      );
+
     if (!execution) {
       return null;
     }
 
-    const feePaidInOutput = execution.quoteReceived * feeRate;
-    const outputAmount = execution.quoteReceived - feePaidInOutput;
+    const feePaidInOutput =
+      execution.quoteReceived *
+      feeRate;
 
-    if (!Number.isFinite(outputAmount) || outputAmount <= 0) {
+    const outputAmount =
+      execution.quoteReceived -
+      feePaidInOutput;
+
+    if (
+      !Number.isFinite(outputAmount) ||
+      outputAmount <= 0
+    ) {
       return null;
     }
 
@@ -228,91 +528,175 @@ export class ArbitrageCalculator {
       toAsset: leg.toAsset,
       inputAmount,
       outputAmount,
-      vwap: execution.quoteReceived / inputAmount,
+      vwap:
+        execution.quoteReceived /
+        (
+          this.roundBaseAmount(
+            leg.symbol,
+            inputAmount
+          ) ?? inputAmount
+        ),
       feePaidInOutput,
-      levelsUsed: execution.levelsUsed
+      levelsUsed:
+        execution.levelsUsed
     };
   }
 
   private buyWithQuote(
+    symbol: string,
     asks: BookLevel[],
     quoteAmount: number
-  ): {
-    baseAmount: number;
-    quoteSpent: number;
-    levelsUsed: number;
-  } | null {
-    if (!Number.isFinite(quoteAmount) || quoteAmount <= 0) {
+  ): BuyExecution | null {
+    const roundedQuote =
+      this.roundQuoteAmount(
+        symbol,
+        quoteAmount
+      );
+
+    if (
+      roundedQuote === null ||
+      roundedQuote <= 0
+    ) {
       return null;
     }
 
-    let quoteLeft = quoteAmount;
+    let quoteLeft =
+      roundedQuote;
+
     let baseAmount = 0;
     let quoteSpent = 0;
     let levelsUsed = 0;
 
     for (const level of asks) {
-      if (quoteLeft <= 1e-12) {
+      if (
+        quoteLeft <= 1e-12
+      ) {
         break;
       }
 
-      if (level.price <= 0 || level.quantity <= 0) {
+      if (
+        !Number.isFinite(level.price) ||
+        !Number.isFinite(level.quantity) ||
+        level.price <= 0 ||
+        level.quantity <= 0
+      ) {
         continue;
       }
 
-      const maxQuoteAtLevel = level.price * level.quantity;
-      const quoteAtLevel = Math.min(quoteLeft, maxQuoteAtLevel);
-      const baseAtLevel = quoteAtLevel / level.price;
+      const maxQuoteAtLevel =
+        level.price *
+        level.quantity;
 
-      baseAmount += baseAtLevel;
-      quoteSpent += quoteAtLevel;
-      quoteLeft -= quoteAtLevel;
+      const quoteAtLevel =
+        Math.min(
+          quoteLeft,
+          maxQuoteAtLevel
+        );
+
+      const baseAtLevel =
+        quoteAtLevel /
+        level.price;
+
+      baseAmount +=
+        baseAtLevel;
+
+      quoteSpent +=
+        quoteAtLevel;
+
+      quoteLeft -=
+        quoteAtLevel;
+
       levelsUsed += 1;
     }
 
-    if (quoteLeft > 1e-8 || baseAmount <= 0 || quoteSpent <= 0) {
+    if (
+      quoteLeft > 1e-8 ||
+      baseAmount <= 0 ||
+      quoteSpent <= 0
+    ) {
+      return null;
+    }
+
+    const roundedBase =
+      this.roundBaseAmount(
+        symbol,
+        baseAmount
+      );
+
+    if (
+      roundedBase === null ||
+      roundedBase <= 0
+    ) {
       return null;
     }
 
     return {
-      baseAmount,
+      baseAmount: roundedBase,
       quoteSpent,
       levelsUsed
     };
   }
 
   private sellBase(
+    symbol: string,
     bids: BookLevel[],
     baseAmount: number
-  ): {
-    quoteReceived: number;
-    levelsUsed: number;
-  } | null {
-    if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
+  ): SellExecution | null {
+    const roundedBase =
+      this.roundBaseAmount(
+        symbol,
+        baseAmount
+      );
+
+    if (
+      roundedBase === null ||
+      roundedBase <= 0
+    ) {
       return null;
     }
 
-    let baseLeft = baseAmount;
+    let baseLeft =
+      roundedBase;
+
     let quoteReceived = 0;
     let levelsUsed = 0;
 
     for (const level of bids) {
-      if (baseLeft <= 1e-12) {
+      if (
+        baseLeft <= 1e-12
+      ) {
         break;
       }
 
-      if (level.price <= 0 || level.quantity <= 0) {
+      if (
+        !Number.isFinite(level.price) ||
+        !Number.isFinite(level.quantity) ||
+        level.price <= 0 ||
+        level.quantity <= 0
+      ) {
         continue;
       }
 
-      const baseAtLevel = Math.min(baseLeft, level.quantity);
+      const baseAtLevel =
+        Math.min(
+          baseLeft,
+          level.quantity
+        );
 
-      quoteReceived += baseAtLevel * level.price;
-      baseLeft -= baseAtLevel;
+      quoteReceived +=
+        baseAtLevel *
+        level.price;
+
+      baseLeft -=
+        baseAtLevel;
+
       levelsUsed += 1;
     }
 
-    if (baseLeft > 1e-8 || quoteReceived <= 0) {
+    if (
+      baseLeft > 1e-8 ||
+      quoteReceived <= 0
+    ) {
       return null;
     }
 
