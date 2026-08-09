@@ -9,6 +9,7 @@ interface SymbolFilter {
   stepSize: number;
   tickSize: number;
   minNotional: number;
+  quoteScale: number;
 }
 
 export interface OrderExecutionConfig {
@@ -480,6 +481,50 @@ export class OrderExecutionService {
     ) / factor;
   }
 
+  private roundPrice(
+    symbol: string,
+    price: number
+  ): number {
+    const filter =
+      this.config.symbolFilters?.get(symbol);
+
+    if (
+      filter &&
+      Number.isFinite(filter.tickSize) &&
+      filter.tickSize > 0
+    ) {
+      return Number(
+        (Math.round(price / filter.tickSize) * filter.tickSize)
+          .toFixed(12)
+      );
+    }
+
+    // Fallback: 8 знаков
+    const factor = 10 ** 8;
+    return Math.round(price * factor) / factor;
+  }
+
+  private roundQuoteQty(
+    symbol: string,
+    quoteQty: number
+  ): number {
+    const filter =
+      this.config.symbolFilters?.get(symbol);
+
+    if (
+      filter &&
+      Number.isFinite(filter.quoteScale) &&
+      filter.quoteScale >= 0
+    ) {
+      const factor = 10 ** filter.quoteScale;
+      return Math.floor(quoteQty * factor) / factor;
+    }
+
+    // Fallback: 4 знака
+    const factor = 10 ** 4;
+    return Math.floor(quoteQty * factor) / factor;
+  }
+
   private async placeOrder(
     symbol: string,
     side: 'BUY' | 'SELL',
@@ -525,6 +570,13 @@ export class OrderExecutionService {
             };
           }
 
+          const sanitizedQuoteQty = this.roundQuoteQty(symbol, inputAmount);
+
+          const filter = this.config.symbolFilters?.get(symbol);
+          const quoteScale = filter?.quoteScale ?? 4;
+
+          const quoteOrderQty = sanitizedQuoteQty.toFixed(quoteScale);
+
           console.log(
             '[ORDER REQUEST]',
             JSON.stringify({
@@ -532,8 +584,7 @@ export class OrderExecutionService {
               side,
               orderType,
               quantity: null,
-              quoteOrderQty:
-                inputAmount.toFixed(8)
+              quoteOrderQty
             })
           );
 
@@ -542,8 +593,7 @@ export class OrderExecutionService {
               symbol: symbol.toUpperCase(),
               side,
               orderType,
-              quoteOrderQty:
-                inputAmount.toFixed(8)
+              quoteOrderQty
             });
 
           return this.waitForPlacedOrder(
@@ -562,6 +612,8 @@ export class OrderExecutionService {
           price =
             this.getBestAsk(symbol) *
             (1 + this.config.aggressivePriceRate);
+
+          price = this.roundPrice(symbol, price);
 
           quantity =
             this.roundQuantity(
@@ -583,6 +635,8 @@ export class OrderExecutionService {
             price =
               this.getBestBid(symbol) *
               (1 - this.config.aggressivePriceRate);
+
+            price = this.roundPrice(symbol, price);
           }
         }
 
