@@ -893,7 +893,7 @@ export class OrderExecutionService {
               price?.toString(),
             timeInForce:
               orderType === 'LIMIT'
-                ? 'GTC'
+                ? 'FOK'
                 : undefined
           });
 
