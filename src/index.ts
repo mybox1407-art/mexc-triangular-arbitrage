@@ -511,15 +511,31 @@ async function main(): Promise<void> {
   const executionConfig:
     OrderExecutionConfig = {
       orderSizeBase: 0.00238,
+  
+      // Не блокируем по абсолютной прибыли,
+      // OpportunityService уже фильтрует по ROI.
       minProfitUsdt: 0,
-      maxRetries: 3,
-      retryDelayMs: 500,
-      orderTimeoutMs: 5000,
+  
+      // Для FOK повторная отправка опасна:
+      // цена и стакан уже могли измениться.
+      maxRetries: 1,
+      retryDelayMs: 300,
+      orderTimeoutMs: 3000,
+  
       enabled:
         config.trading.liveTrading,
-      useMarketOrders: true,
-      aggressivePriceRate: 0,
+  
+      // LIMIT + FOK
+      useMarketOrders: false,
+  
+      // BUY: максимум на 0.05% выше ask.
+      // SELL: максимум на 0.05% ниже bid.
+      aggressivePriceRate: 0.0005,
+  
+      // Не отправлять заявку, если округление
+      // съедает больше 0.1% объёма.
       maxRoundingLossRate: 0.001,
+  
       symbolFilters
     };
 
