@@ -5,7 +5,7 @@ import {
 import { OrderBook } from '../domain/orderBook.js';
 import { Opportunity } from '../domain/types.js';
 
-interface SymbolFilter {
+export interface SymbolFilter {
   stepSize: number;
   tickSize: number;
   minNotional: number;
