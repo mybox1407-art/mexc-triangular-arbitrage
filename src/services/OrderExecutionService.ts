@@ -7,6 +7,7 @@ import { Opportunity } from '../domain/types.js';
 
 export interface SymbolFilter {
   stepSize: number;
+  minQuantity: number;
   tickSize: number;
   minNotional: number;
   quoteScale: number;
@@ -25,6 +26,7 @@ export interface OrderExecutionConfig {
   marketBuyBufferRate?: number;
   defaultQuantityPrecision?: number;
   maxExecutionDeviationRate?: number;
+  maxRoundingLossRate?: number;
   symbolFilters?: Map<string, SymbolFilter>;
 }
 
@@ -121,6 +123,7 @@ export class OrderExecutionService {
       marketBuyBufferRate: 0.003,
       defaultQuantityPrecision: 6,
       maxExecutionDeviationRate: 0.02,
+      maxRoundingLossRate: 0.001,
       ...config
     };
   }
@@ -292,7 +295,7 @@ export class OrderExecutionService {
 
       if (!invariantOk) {
         console.error(
-          '[EXEC] Final invariant failed'
+          '[INVARIANT] Final invariant failed'
         );
       }
 
@@ -307,7 +310,9 @@ export class OrderExecutionService {
         `[EXEC] ${report.status}: ` +
         `${opportunity.triangleId}, ` +
         `profit=${report.totalProfitUsdt}, ` +
-        `roi=${(report.actualRoi * 100).toFixed(4)}%`
+        `roi=${(
+          report.actualRoi * 100
+        ).toFixed(4)}%`
       );
 
       return report;
@@ -423,7 +428,8 @@ export class OrderExecutionService {
 
     return Number(
       (
-        Math.floor(value / step) * step
+        Math.floor(value / step) *
+        step
       ).toFixed(12)
     );
   }
@@ -522,6 +528,95 @@ export class OrderExecutionService {
     );
   }
 
+  private validateRoundingLoss(
+    symbol: string,
+    inputAmount: number,
+    roundedAmount: number,
+    field: string
+  ): string | null {
+    if (
+      !Number.isFinite(inputAmount) ||
+      inputAmount <= 0 ||
+      !Number.isFinite(roundedAmount) ||
+      roundedAmount <= 0
+    ) {
+      return (
+        `Invalid ${field} rounding values: ` +
+        `input=${inputAmount}, ` +
+        `rounded=${roundedAmount}`
+      );
+    }
+
+    const lossRate =
+      (
+        inputAmount -
+        roundedAmount
+      ) / inputAmount;
+
+    const maxLossRate =
+      this.config.maxRoundingLossRate ??
+      0.001;
+
+    console.log(
+      `[ROUNDING] ${symbol} ${field}: ` +
+      `input=${inputAmount}, ` +
+      `rounded=${roundedAmount}, ` +
+      `loss=${(
+        lossRate * 100
+      ).toFixed(4)}%`
+    );
+
+    if (
+      lossRate > maxLossRate
+    ) {
+      return (
+        `Rounding loss too high for ${symbol}: ` +
+        `field=${field}, ` +
+        `input=${inputAmount}, ` +
+        `rounded=${roundedAmount}, ` +
+        `loss=${(
+          lossRate * 100
+        ).toFixed(4)}%, ` +
+        `max=${(
+          maxLossRate * 100
+        ).toFixed(4)}%`
+      );
+    }
+
+    return null;
+  }
+
+  private validateMinimumQuantity(
+    symbol: string,
+    quantity: number
+  ): string | null {
+    const filter =
+      this.config.symbolFilters?.get(
+        symbol.toUpperCase()
+      );
+
+    if (
+      !filter ||
+      !Number.isFinite(filter.minQuantity) ||
+      filter.minQuantity <= 0
+    ) {
+      return null;
+    }
+
+    if (
+      quantity < filter.minQuantity
+    ) {
+      return (
+        `Quantity below MEXC minimum: ` +
+        `symbol=${symbol}, ` +
+        `quantity=${quantity}, ` +
+        `minQuantity=${filter.minQuantity}`
+      );
+    }
+
+    return null;
+  }
+
   private async placeOrder(
     symbol: string,
     side: 'BUY' | 'SELL',
@@ -553,7 +648,10 @@ export class OrderExecutionService {
           const minNotional =
             this.config.minOrderNotional ?? 1;
 
-          if (inputAmount < minNotional) {
+          if (
+            inputAmount <
+            minNotional
+          ) {
             return {
               success: false,
               error:
@@ -568,6 +666,22 @@ export class OrderExecutionService {
               symbol,
               inputAmount
             );
+
+          const roundingError =
+            this.validateRoundingLoss(
+              symbol,
+              inputAmount,
+              sanitizedQuoteQty,
+              'quoteOrderQty'
+            );
+
+          if (roundingError) {
+            return {
+              success: false,
+              error: roundingError,
+              timestamp: Date.now()
+            };
+          }
 
           const filter =
             this.config.symbolFilters?.get(
@@ -622,19 +736,59 @@ export class OrderExecutionService {
               price
             );
 
+          const rawQuantity =
+            inputAmount / price;
+
           quantity =
             this.roundQuantity(
               symbol,
-              inputAmount / price
-            );
-        } else {
-          quantity =
-            this.roundQuantity(
-              symbol,
-              inputAmount
+              rawQuantity
             );
 
-          if (orderType === 'LIMIT') {
+          const roundingError =
+            this.validateRoundingLoss(
+              symbol,
+              rawQuantity,
+              quantity,
+              'quantity'
+            );
+
+          if (roundingError) {
+            return {
+              success: false,
+              error: roundingError,
+              timestamp: Date.now()
+            };
+          }
+        } else {
+          const rawQuantity =
+            inputAmount;
+
+          quantity =
+            this.roundQuantity(
+              symbol,
+              rawQuantity
+            );
+
+          const roundingError =
+            this.validateRoundingLoss(
+              symbol,
+              rawQuantity,
+              quantity,
+              'quantity'
+            );
+
+          if (roundingError) {
+            return {
+              success: false,
+              error: roundingError,
+              timestamp: Date.now()
+            };
+          }
+
+          if (
+            orderType === 'LIMIT'
+          ) {
             price =
               this.getBestBid(symbol) *
               (
@@ -658,6 +812,20 @@ export class OrderExecutionService {
           throw new Error(
             `Invalid quantity for ${symbol}: ${quantity}`
           );
+        }
+
+        const minimumQuantityError =
+          this.validateMinimumQuantity(
+            symbol,
+            quantity
+          );
+
+        if (minimumQuantityError) {
+          return {
+            success: false,
+            error: minimumQuantityError,
+            timestamp: Date.now()
+          };
         }
 
         if (
@@ -688,7 +856,9 @@ export class OrderExecutionService {
           this.config.minOrderNotional ??
           1;
 
-        if (notional < minNotional) {
+        if (
+          notional < minNotional
+        ) {
           return {
             success: false,
             error:
@@ -717,8 +887,10 @@ export class OrderExecutionService {
             symbol: symbol.toUpperCase(),
             side,
             orderType,
-            quantity: quantity.toString(),
-            price: price?.toString(),
+            quantity:
+              quantity.toString(),
+            price:
+              price?.toString(),
             timeInForce:
               orderType === 'LIMIT'
                 ? 'GTC'
@@ -906,7 +1078,9 @@ export class OrderExecutionService {
           `| avgPrice=${avgPrice}`
         );
 
-        if (raw.status === 'FILLED') {
+        if (
+          raw.status === 'FILLED'
+        ) {
           if (
             !Number.isFinite(executedQty) ||
             executedQty <= 0 ||
@@ -936,10 +1110,14 @@ export class OrderExecutionService {
           return {
             success: true,
             orderId,
-            filledQuantity: executedQty,
-            receivedQuantity: received,
-            executedPrice: avgPrice,
-            executedQuoteQty: quoteQty,
+            filledQuantity:
+              executedQty,
+            receivedQuantity:
+              received,
+            executedPrice:
+              avgPrice,
+            executedQuoteQty:
+              quoteQty,
             fees,
             timestamp: Date.now(),
             isMarketOrder:
@@ -987,8 +1165,10 @@ export class OrderExecutionService {
               side === 'BUY'
                 ? executedQty
                 : quoteQty,
-            executedPrice: avgPrice,
-            executedQuoteQty: quoteQty,
+            executedPrice:
+              avgPrice,
+            executedQuoteQty:
+              quoteQty,
             fees,
             error:
               `Order ${raw.status}`,
@@ -1036,9 +1216,9 @@ export class OrderExecutionService {
 
     if (
       !Number.isFinite(expectedFinal) ||
+      actualFinal === undefined ||
       !Number.isFinite(actualFinal) ||
       expectedFinal <= 0 ||
-      actualFinal === undefined ||
       actualFinal <= 0
     ) {
       console.error(
@@ -1060,14 +1240,22 @@ export class OrderExecutionService {
     console.log(
       `[INVARIANT] expected=${expectedFinal}, ` +
       `actual=${actualFinal}, ` +
-      `deviation=${(deviation * 100).toFixed(2)}%`
+      `deviation=${(
+        deviation * 100
+      ).toFixed(2)}%`
     );
 
-    if (deviation > maxDeviation) {
+    if (
+      deviation > maxDeviation
+    ) {
       console.error(
         `[INVARIANT] FAILED: deviation ` +
-        `${(deviation * 100).toFixed(2)}% > ` +
-        `${(maxDeviation * 100).toFixed(2)}%`
+        `${(
+          deviation * 100
+        ).toFixed(2)}% > ` +
+        `${(
+          maxDeviation * 100
+        ).toFixed(2)}%`
       );
 
       return false;
@@ -1198,11 +1386,7 @@ export class OrderExecutionService {
       opportunity,
       orders,
       totalProfitUsdt: actualProfit,
-
-      // Комиссии могут быть в MX, THE, USDT и т.д.
-      // Поэтому это поле не используется для смешанных валют.
       totalFeesUsdt: 0,
-
       feesByAsset,
       feesAreActual:
         feesByAsset.length > 0,
@@ -1210,7 +1394,8 @@ export class OrderExecutionService {
       executionTimeMs:
         Date.now() - startTime,
       status,
-      actualFinalAmount: actualFinal,
+      actualFinalAmount:
+        actualFinal,
       profitIsActual:
         actualFinal !== undefined
     };
@@ -1231,7 +1416,9 @@ export class OrderExecutionService {
     const snapshot =
       book.getSnapshot(5);
 
-    if (snapshot.bids.length === 0) {
+    if (
+      snapshot.bids.length === 0
+    ) {
       throw new Error(
         `No bids for ${symbol}`
       );
@@ -1255,7 +1442,9 @@ export class OrderExecutionService {
     const snapshot =
       book.getSnapshot(5);
 
-    if (snapshot.asks.length === 0) {
+    if (
+      snapshot.asks.length === 0
+    ) {
       throw new Error(
         `No asks for ${symbol}`
       );
@@ -1269,7 +1458,10 @@ export class OrderExecutionService {
   ): Promise<void> {
     return new Promise(
       (resolve) =>
-        setTimeout(resolve, milliseconds)
+        setTimeout(
+          resolve,
+          milliseconds
+        )
     );
   }
 
@@ -1299,7 +1491,10 @@ export class OrderExecutionService {
           )
         );
 
-    await Promise.all(cancellations);
+    await Promise.all(
+      cancellations
+    );
+
     this.activeOrders.clear();
   }
 
