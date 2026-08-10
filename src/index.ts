@@ -512,28 +512,36 @@ async function main(): Promise<void> {
     OrderExecutionConfig = {
       orderSizeBase: 0.00238,
   
-      // Не блокируем по абсолютной прибыли,
-      // OpportunityService уже фильтрует по ROI.
+      // OpportunityService уже фильтрует возможности по ROI.
       minProfitUsdt: 0,
   
-      // Для FOK повторная отправка опасна:
-      // цена и стакан уже могли измениться.
+      // Для IOC всегда оставляем одну попытку.
+      // Повторная заявка может создать дополнительную позицию,
+      // если первая уже исполнилась частично.
       maxRetries: 1,
       retryDelayMs: 300,
-      orderTimeoutMs: 3000,
+  
+      // IOC должен завершаться быстро.
+      orderTimeoutMs: 1000,
   
       enabled:
         config.trading.liveTrading,
   
-      // LIMIT + FOK
+      // Используем лимитные, а не market-ордера.
       useMarketOrders: false,
   
-      // BUY: максимум на 0.05% выше ask.
-      // SELL: максимум на 0.05% ниже bid.
+      // Новый режим исполнения.
+      executionTimeInForce: 'IOC',
+  
+      // Первый тест только с полным исполнением.
+      // Любой partial fill останавливает треугольник.
+      minFillRatio: 1,
+  
+      // Параметр агрессивности оставляем без изменения.
       aggressivePriceRate: 0.0005,
   
-      // Не отправлять заявку, если округление
-      // съедает больше 0.1% объёма.
+      // Отмена заявки, если округление съедает
+      // больше 0.1% объёма.
       maxRoundingLossRate: 0.001,
   
       symbolFilters
