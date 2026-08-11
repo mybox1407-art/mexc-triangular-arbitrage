@@ -522,7 +522,7 @@ async function main(): Promise<void> {
       retryDelayMs: 300,
   
       // IOC должен завершаться быстро.
-      orderTimeoutMs: 1000,
+      orderTimeoutMs: 3000,
   
       enabled:
         config.trading.liveTrading,
@@ -535,10 +535,10 @@ async function main(): Promise<void> {
   
       // Первый тест только с полным исполнением.
       // Любой partial fill останавливает треугольник.
-      minFillRatio: 1,
+      minFillRatio: 0.95,
   
       // Параметр агрессивности оставляем без изменения.
-      aggressivePriceRate: 0.0005,
+      aggressivePriceRate: 0.0001,
   
       // Отмена заявки, если округление съедает
       // больше 0.1% объёма.
