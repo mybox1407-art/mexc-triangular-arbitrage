@@ -22,7 +22,7 @@ export interface OrderExecutionConfig {
   enabled: boolean;
   useMarketOrders: boolean;
   aggressivePriceRate: number;
-  executionTimeInForce?: 'FOK' | 'IOC';
+  executionTimeInForce?: 'FOK' | 'IOC' | 'GTC';
   minFillRatio?: number;
   minOrderNotional?: number;
   marketBuyBufferRate?: number;
@@ -126,7 +126,7 @@ export class OrderExecutionService {
       defaultQuantityPrecision: 6,
       maxExecutionDeviationRate: 0.02,
       maxRoundingLossRate: 0.001,
-      executionTimeInForce: 'IOC',
+      executionTimeInForce: 'GTC',
       minFillRatio: 1,
       ...config
     };
@@ -664,8 +664,8 @@ export class OrderExecutionService {
     return null;
   }
 
-  private getTimeInForce(): 'FOK' | 'IOC' {
-    return this.config.executionTimeInForce ?? 'IOC';
+  private getTimeInForce(): 'FOK' | 'IOC' | 'GTC' {
+    return this.config.executionTimeInForce ?? 'GTC';
   }
 
   private getMinFillRatio(): number {
@@ -1121,9 +1121,8 @@ export class OrderExecutionService {
           ? quoteQty
           : undefined,
       fees,
-      error:
-        `Order ${status}; ` +
-        'IOC residual canceled',
+    error:
+      `Order ${status}; residual canceled`,
       timestamp: Date.now(),
       isMarketOrder:
         this.config.useMarketOrders
@@ -1350,15 +1349,117 @@ export class OrderExecutionService {
       orderId,
       symbol
     );
-
-    return {
-      success: false,
-      orderId,
-      error: 'Order timeout',
-      timestamp: Date.now(),
-      isMarketOrder:
-        this.config.useMarketOrders
-    };
+    
+    await this.sleep(150);
+    
+    try {
+      const finalStatus =
+        await this.client.getOrderStatus(
+          orderId,
+          symbol
+        );
+    
+      console.log(
+        '[STATUS AFTER CANCEL]',
+        orderId,
+        symbol,
+        JSON.stringify(finalStatus)
+      );
+    
+      const finalRaw =
+        finalStatus as unknown as RawOrderStatus;
+    
+      const finalExecutedQty =
+        this.parseNumber(
+          finalRaw.executedQty
+        );
+    
+      const finalRawQuoteQty =
+        this.parseNumber(
+          finalRaw.cummulativeQuoteQty ??
+          finalRaw.cumulativeQuoteQty
+        );
+    
+      const finalReportedAvgPrice =
+        this.parseNumber(
+          finalRaw.avgPrice ??
+          finalRaw.price
+        );
+    
+      const finalCalculatedAvgPrice =
+        finalExecutedQty > 0 &&
+        finalRawQuoteQty > 0
+          ? finalRawQuoteQty / finalExecutedQty
+          : NaN;
+    
+      const finalAvgPrice =
+        Number.isFinite(
+          finalCalculatedAvgPrice
+        )
+          ? finalCalculatedAvgPrice
+          : finalReportedAvgPrice;
+    
+      const finalQuoteQty =
+        Number.isFinite(finalRawQuoteQty) &&
+        finalRawQuoteQty > 0
+          ? finalRawQuoteQty
+          : (
+              finalExecutedQty > 0 &&
+              Number.isFinite(finalAvgPrice) &&
+              finalAvgPrice > 0
+                ? finalExecutedQty * finalAvgPrice
+                : NaN
+            );
+    
+      if (
+        finalExecutedQty > 0 &&
+        Number.isFinite(finalQuoteQty) &&
+        finalQuoteQty > 0
+      ) {
+        const fees =
+          await this.loadOrderFees(
+            orderId,
+            symbol
+          );
+    
+        return this.buildPartialResult(
+          orderId,
+          symbol,
+          side,
+          `${finalRaw.status}_AFTER_CANCEL`,
+          finalExecutedQty,
+          finalQuoteQty,
+          finalAvgPrice,
+          fees
+        );
+      }
+    
+      return {
+        success: false,
+        orderId,
+        error:
+          `Order timeout; final status=${finalRaw.status}`,
+        timestamp: Date.now(),
+        isMarketOrder:
+          this.config.useMarketOrders
+      };
+    } catch (error) {
+      console.error(
+        `[STATUS AFTER CANCEL] Failed for ${orderId}:`,
+        error instanceof Error
+          ? error.message
+          : String(error)
+      );
+    
+      return {
+        success: false,
+        orderId,
+        error: 'Order timeout',
+        timestamp: Date.now(),
+        isMarketOrder:
+          this.config.useMarketOrders
+      };
+    }
   }
 
   private checkExecutionInvariant(
