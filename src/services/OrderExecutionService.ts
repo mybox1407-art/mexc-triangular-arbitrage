@@ -1149,6 +1149,13 @@ export class OrderExecutionService {
             symbol
           );
 
+        console.log(
+          '[STATUS RAW]',
+          orderId,
+          symbol,
+          JSON.stringify(status)
+        );
+        
         const raw =
           status as unknown as RawOrderStatus;
 
