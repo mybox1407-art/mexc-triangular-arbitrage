@@ -515,32 +515,26 @@ async function main(): Promise<void> {
       // OpportunityService уже фильтрует возможности по ROI.
       minProfitUsdt: 0,
   
-      // Для GTC повторные заявки также запрещены:
-      // после timeout заявка сначала отменяется,
-      // а не создаётся повторно.
-      maxRetries: 1,
-      retryDelayMs: 300,
+      // Для market ордеров повторы не нужны — заполняются мгновенно.
+      maxRetries: 0,
+      retryDelayMs: 0,
   
-      // GTC живёт максимум 800 мс,
-      // затем бот отменяет заявку и проверяет
-      // её финальный статус ещё раз.
-      orderTimeoutMs: 800,
+      // Таймаут для market можно увеличить для безопасности.
+      orderTimeoutMs: 2000,
   
       enabled:
         config.trading.liveTrading,
   
-      // Используем лимитные ордера.
-      useMarketOrders: false,
+      // 🔥 РЫНОЧНЫЕ ОРДЕРА
+      useMarketOrders: true,
   
-      // Ограниченный GTC.
-      executionTimeInForce: 'GTC',
+      // Для market TimeInForce не используется, но оставим IOC.
+      executionTimeInForce: 'IOC',
   
-      // Для первого теста пропускаем только полный fill.
+      // Требуем полный fill (market обычно заполняет сразу).
       minFillRatio: 1,
   
-      // Оставляем текущее значение.
-      // Важно: оно реально влияет на цену
-      // только если используется в OrderExecutionService.
+      // Для market не используется, но оставим.
       aggressivePriceRate: 0.0001,
   
       // Максимальная потеря на округлении — 0.1%.
