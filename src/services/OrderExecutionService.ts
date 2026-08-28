@@ -698,8 +698,9 @@ export class OrderExecutionService {
         ? 'MARKET'
         : 'LIMIT';
 
+    // Исправлено: сравниваем executionTimeInForce, а не orderType
     const maxRetries =
-      orderType === 'IOC'
+      this.config.executionTimeInForce === 'IOC'
         ? 1
         : Math.max(1, this.config.maxRetries);
 
