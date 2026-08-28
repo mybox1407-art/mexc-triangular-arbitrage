@@ -93,7 +93,7 @@ export const config = {
 
     minGrossRoiAfterFees: rateEnv(
       'MIN_GROSS_ROI_AFTER_FEES',
-      '0.003'
+      '0.008'  // ← 0.8% по умолчанию
     ),
 
     takerFeeRate: rateEnv('TAKER_FEE_RATE', '0.0005'),
