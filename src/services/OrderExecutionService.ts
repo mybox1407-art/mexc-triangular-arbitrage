@@ -1,3 +1,5 @@
+// src/services/OrderExecutionService.ts
+
 import {
   MexcAuthenticatedClient
 } from '../mexc/MexcAuthenticatedClient.js';
@@ -197,6 +199,8 @@ export class OrderExecutionService {
           this.getTimeInForce(),
         minFillRatio:
           this.getMinFillRatio(),
+        useMarketOrders:
+          this.config.useMarketOrders,
         legs: opportunity.legs.map((leg) => ({
           symbol: leg.symbol,
           side: leg.side,
@@ -642,7 +646,7 @@ export class OrderExecutionService {
     const filter =
       this.config.symbolFilters?.get(
         symbol.toUpperCase()
-      );
+    );
 
     if (
       !filter ||
@@ -689,8 +693,13 @@ export class OrderExecutionService {
     inputAmount: number,
     expectedLimitPrice: number
   ): Promise<OrderResult> {
+    const orderType =
+      this.config.useMarketOrders
+        ? 'MARKET'
+        : 'LIMIT';
+
     const maxRetries =
-      this.getTimeInForce() === 'IOC'
+      orderType === 'IOC'
         ? 1
         : Math.max(1, this.config.maxRetries);
 
@@ -700,38 +709,12 @@ export class OrderExecutionService {
       attempt++
     ) {
       try {
-        const orderType =
-          this.config.useMarketOrders
-            ? 'MARKET'
-            : 'LIMIT';
-
-        let quantity:
-          | number
-          | undefined;
-
-        let price:
-          | number
-          | undefined;
-
+        // =========================
+        // MARKET BUY
+        // =========================
         if (
-          orderType === 'LIMIT' &&
-          (
-            !Number.isFinite(expectedLimitPrice) ||
-            expectedLimitPrice <= 0
-          )
-        ) {
-          return {
-            success: false,
-            error:
-              `Invalid expected limit price ` +
-              `for ${symbol}: ${expectedLimitPrice}`,
-            timestamp: Date.now()
-          };
-        }
-
-        if (
-          side === 'BUY' &&
-          orderType === 'MARKET'
+          orderType === 'MARKET' &&
+          side === 'BUY'
         ) {
           const minNotional =
             this.config.minOrderNotional ?? 1;
@@ -805,39 +788,14 @@ export class OrderExecutionService {
           );
         }
 
-        if (side === 'BUY') {
-          price =
-            this.roundPrice(
-              symbol,
-              expectedLimitPrice
-            );
-
-          const rawQuantity =
-            inputAmount / price;
-
-          quantity =
-            this.roundQuantity(
-              symbol,
-              rawQuantity
-            );
-
-          const roundingError =
-            this.validateRoundingLoss(
-              symbol,
-              rawQuantity,
-              quantity,
-              'quantity'
-            );
-
-          if (roundingError) {
-            return {
-              success: false,
-              error: roundingError,
-              timestamp: Date.now()
-            };
-          }
-        } else {
-          quantity =
+        // =========================
+        // MARKET SELL
+        // =========================
+        if (
+          orderType === 'MARKET' &&
+          side === 'SELL'
+        ) {
+          let quantity =
             this.roundQuantity(
               symbol,
               inputAmount
@@ -859,104 +817,261 @@ export class OrderExecutionService {
             };
           }
 
-          if (orderType === 'LIMIT') {
+          const minimumQuantityError =
+            this.validateMinimumQuantity(
+              symbol,
+              quantity
+            );
+
+          if (minimumQuantityError) {
+            return {
+              success: false,
+              error: minimumQuantityError,
+              timestamp: Date.now()
+            };
+          }
+
+          const filter =
+            this.config.symbolFilters?.get(
+              symbol.toUpperCase()
+            );
+
+          const minNotional =
+            filter?.minNotional ??
+            this.config.minOrderNotional ??
+            1;
+
+          const referencePrice =
+            this.getBestBid(symbol);
+
+          const notional =
+            quantity * referencePrice;
+
+          if (notional < minNotional) {
+            return {
+              success: false,
+              error:
+                `Order below minNotional: ${symbol}, ` +
+                `notional=${notional}, ` +
+                `minimum=${minNotional}`,
+              timestamp: Date.now()
+            };
+          }
+
+          console.log(
+            '[ORDER REQUEST]',
+            JSON.stringify({
+              symbol,
+              side,
+              orderType,
+              quantity,
+              quoteOrderQty: null,
+              price: null,
+              timeInForce: undefined,
+              estimatedNotional: notional
+            })
+          );
+
+          const order =
+            await this.client.placeOrder({
+              symbol: symbol.toUpperCase(),
+              side,
+              orderType,
+              quantity: quantity.toString()
+              // no price, no timeInForce for MARKET
+            });
+
+          return this.waitForPlacedOrder(
+            order.orderId,
+            symbol,
+            side,
+            quantity
+          );
+        }
+
+        // =========================
+        // LIMIT логика (только если !useMarketOrders)
+        // =========================
+        if (orderType === 'LIMIT') {
+          if (
+            !Number.isFinite(expectedLimitPrice) ||
+            expectedLimitPrice <= 0
+          ) {
+            return {
+              success: false,
+              error:
+                `Invalid expected limit price ` +
+                `for ${symbol}: ${expectedLimitPrice}`,
+              timestamp: Date.now()
+            };
+          }
+
+          let quantity:
+            | number
+            | undefined;
+
+          let price:
+            | number
+            | undefined;
+
+          if (side === 'BUY') {
+            price =
+              this.roundPrice(
+                symbol,
+                expectedLimitPrice
+              );
+
+            const rawQuantity =
+              inputAmount / price;
+
+            quantity =
+              this.roundQuantity(
+                symbol,
+                rawQuantity
+              );
+
+            const roundingError =
+              this.validateRoundingLoss(
+                symbol,
+                rawQuantity,
+                quantity,
+                'quantity'
+              );
+
+            if (roundingError) {
+              return {
+                success: false,
+                error: roundingError,
+                timestamp: Date.now()
+              };
+            }
+          } else {
+            quantity =
+              this.roundQuantity(
+                symbol,
+                inputAmount
+              );
+
+            const roundingError =
+              this.validateRoundingLoss(
+                symbol,
+                inputAmount,
+                quantity,
+                'quantity'
+              );
+
+            if (roundingError) {
+              return {
+                success: false,
+                error: roundingError,
+                timestamp: Date.now()
+              };
+            }
+
             price =
               this.roundPrice(
                 symbol,
                 expectedLimitPrice
               );
           }
-        }
 
-        if (
-          quantity === undefined ||
-          !Number.isFinite(quantity) ||
-          quantity <= 0
-        ) {
-          throw new Error(
-            `Invalid quantity for ${symbol}: ${quantity}`
+          if (
+            quantity === undefined ||
+            !Number.isFinite(quantity) ||
+            quantity <= 0
+          ) {
+            throw new Error(
+              `Invalid quantity for ${symbol}: ${quantity}`
+            );
+          }
+
+          const minimumQuantityError =
+            this.validateMinimumQuantity(
+              symbol,
+              quantity
+            );
+
+          if (minimumQuantityError) {
+            return {
+              success: false,
+              error: minimumQuantityError,
+              timestamp: Date.now()
+            };
+          }
+
+          const referencePrice =
+            price ??
+            this.getBestBid(symbol);
+
+          const notional =
+            side === 'SELL'
+              ? quantity * referencePrice
+              : inputAmount;
+
+          const filter =
+            this.config.symbolFilters?.get(
+              symbol.toUpperCase()
+            );
+
+          const minNotional =
+            filter?.minNotional ??
+            this.config.minOrderNotional ??
+            1;
+
+          if (notional < minNotional) {
+            return {
+              success: false,
+              error:
+                `Order below minNotional: ${symbol}, ` +
+                `notional=${notional}, ` +
+                `minimum=${minNotional}`,
+              timestamp: Date.now()
+            };
+          }
+
+          const timeInForce =
+            this.getTimeInForce();
+
+          console.log(
+            '[ORDER REQUEST]',
+            JSON.stringify({
+              symbol,
+              side,
+              orderType,
+              quantity,
+              quoteOrderQty: null,
+              price,
+              timeInForce,
+              estimatedNotional: notional
+            })
           );
-        }
 
-        const minimumQuantityError =
-          this.validateMinimumQuantity(
+          const order =
+            await this.client.placeOrder({
+              symbol: symbol.toUpperCase(),
+              side,
+              orderType,
+              quantity: quantity.toString(),
+              price: price?.toString(),
+              timeInForce
+            });
+
+          return this.waitForPlacedOrder(
+            order.orderId,
             symbol,
+            side,
             quantity
           );
-
-        if (minimumQuantityError) {
-          return {
-            success: false,
-            error: minimumQuantityError,
-            timestamp: Date.now()
-          };
         }
 
-        const referencePrice =
-          price ??
-          this.getBestBid(symbol);
-
-        const notional =
-          side === 'SELL'
-            ? quantity * referencePrice
-            : inputAmount;
-
-        const filter =
-          this.config.symbolFilters?.get(
-            symbol.toUpperCase()
-          );
-
-        const minNotional =
-          filter?.minNotional ??
-          this.config.minOrderNotional ??
-          1;
-
-        if (notional < minNotional) {
-          return {
-            success: false,
-            error:
-              `Order below minNotional: ${symbol}, ` +
-              `notional=${notional}, ` +
-              `minimum=${minNotional}`,
-            timestamp: Date.now()
-          };
-        }
-
-        const timeInForce =
-          orderType === 'LIMIT'
-            ? this.getTimeInForce()
-            : undefined;
-
-        console.log(
-          '[ORDER REQUEST]',
-          JSON.stringify({
-            symbol,
-            side,
-            orderType,
-            quantity,
-            quoteOrderQty: null,
-            price: price ?? null,
-            timeInForce,
-            estimatedNotional: notional
-          })
-        );
-
-        const order =
-          await this.client.placeOrder({
-            symbol: symbol.toUpperCase(),
-            side,
-            orderType,
-            quantity: quantity.toString(),
-            price: price?.toString(),
-            timeInForce
-          });
-
-        return this.waitForPlacedOrder(
-          order.orderId,
-          symbol,
-          side,
-          quantity
-        );
+        // Если сюда попали — что‑то не так
+        return {
+          success: false,
+          error:
+            `Unsupported order configuration: ` +
+            `orderType=${orderType}, side=${side}`,
+          timestamp: Date.now()
+        };
       } catch (error) {
         const message =
           error instanceof Error
@@ -1121,8 +1236,8 @@ export class OrderExecutionService {
           ? quoteQty
           : undefined,
       fees,
-    error:
-      `Order ${status}; residual canceled`,
+      error:
+        `Order ${status}; residual canceled`,
       timestamp: Date.now(),
       isMarketOrder:
         this.config.useMarketOrders
@@ -1136,6 +1251,8 @@ export class OrderExecutionService {
     requestedQuantity?: number
   ): Promise<OrderResult> {
     const startedAt = Date.now();
+    const isMarketOrder =
+      this.config.useMarketOrders;
 
     while (
       Date.now() - startedAt <
@@ -1239,7 +1356,9 @@ export class OrderExecutionService {
             };
           }
 
+          // minFillRatio проверяем ТОЛЬКО для LIMIT
           if (
+            !isMarketOrder &&
             fillRatio <
             this.getMinFillRatio()
           ) {
