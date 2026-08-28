@@ -22,6 +22,7 @@ import {
 
 const ALLOWED_ASSETS = new Set([
   'USDC', 'USDT', 'BTC', 'ETH', 'SOL', 'XRP', 'DOGE',
+  'FONE', 'BISCOTTI', 'ZAY', 'UPID', 'WHEN', 'NPC', 
   'LTC', 'BCH', 'TRX', 'ADA', 'LINK', 'AVAX', 'DOT',
   'TON', 'BNB', 'SUI', 'APT', 'NEAR', 'ATOM', 'FIL',
   'ARB', 'OP', 'AAVE', 'UNI', 'ETC', 'XLM', 'HBAR',
