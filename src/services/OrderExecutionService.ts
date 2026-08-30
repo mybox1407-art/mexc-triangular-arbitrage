@@ -6,6 +6,12 @@ import {
 
 import { OrderBook } from '../domain/orderBook.js';
 import { Opportunity } from '../domain/types.js';
+import pino from 'pino';
+import { config } from '../config.js';
+
+const logger = pino({
+  level: config.logLevel
+});
 
 export interface SymbolFilter {
   stepSize: number;
@@ -98,6 +104,19 @@ const NON_RETRYABLE_PATTERNS = [
   'invalid quantity',
   'invalid price'
 ];
+
+type BuyExecution = {
+  baseAmount: number;
+  quoteSpent: number;
+  levelsUsed: number;
+  limitPrice: number;
+};
+
+type SellExecution = {
+  quoteReceived: number;
+  levelsUsed: number;
+  limitPrice: number;
+};
 
 export class OrderExecutionService {
   private readonly client: MexcAuthenticatedClient;
@@ -389,6 +408,310 @@ export class OrderExecutionService {
     return received;
   }
 
+  private async revalidateLeg(
+    legIndex: number,
+    opportunity: Opportunity,
+    actualInputAmount: number
+  ): Promise<boolean> {
+    const leg = opportunity.legs[legIndex];
+    const book = this.orderBooks.get(leg.symbol);
+
+    if (!book) {
+      logger.warn(
+        { symbol: leg.symbol },
+        '[REVALIDATE] Order book not found'
+      );
+
+      return false;
+    }
+
+    const snapshot = book.getSnapshot(50);
+
+    const maxBookAgeMs = 400;
+
+    if (
+      !snapshot.ready ||
+      Date.now() - snapshot.updatedAt > maxBookAgeMs
+    ) {
+      logger.warn(
+        {
+          symbol: leg.symbol,
+          ageMs: Date.now() - snapshot.updatedAt
+        },
+        '[REVALIDATE] Order book stale'
+      );
+
+      return false;
+    }
+
+    const feeRate = this.getTakerFeeRate(leg.symbol);
+
+    const currentLegResult = this.simulateLeg(
+      leg,
+      snapshot.bids,
+      snapshot.asks,
+      actualInputAmount,
+      feeRate
+    );
+
+    if (!currentLegResult) {
+      logger.warn(
+        { symbol: leg.symbol },
+        '[REVALIDATE] Current leg simulation failed'
+      );
+
+      return false;
+    }
+
+    if (legIndex < opportunity.legs.length - 1) {
+      let amount = currentLegResult.outputAmount;
+
+      for (let i = legIndex + 1; i < opportunity.legs.length; i++) {
+        const suffixLeg = opportunity.legs[i];
+        const suffixBook = this.orderBooks.get(suffixLeg.symbol);
+
+        if (!suffixBook) {
+          logger.warn(
+            { symbol: suffixLeg.symbol },
+            '[REVALIDATE] Suffix order book not found'
+          );
+
+          return false;
+        }
+
+        const suffixSnapshot = suffixBook.getSnapshot(50);
+
+        if (!suffixSnapshot.ready) {
+          logger.warn(
+            { symbol: suffixLeg.symbol },
+            '[REVALIDATE] Suffix order book not ready'
+          );
+
+          return false;
+        }
+
+        const suffixFee = this.getTakerFeeRate(suffixLeg.symbol);
+        const suffixResult = this.simulateLeg(
+          suffixLeg,
+          suffixSnapshot.bids,
+          suffixSnapshot.asks,
+          amount,
+          suffixFee
+        );
+
+        if (!suffixResult) {
+          logger.warn(
+            { symbol: suffixLeg.symbol },
+            '[REVALIDATE] Suffix leg simulation failed'
+          );
+
+          return false;
+        }
+
+        amount = suffixResult.outputAmount;
+      }
+
+      const remainingRoi = (amount - opportunity.startAmount) / opportunity.startAmount;
+
+      const minRequiredRoi = 0.0005;
+
+      if (remainingRoi < minRequiredRoi) {
+        logger.warn(
+          {
+            legIndex,
+            remainingRoi,
+            triangleId: opportunity.triangleId
+          },
+          '[REVALIDATE] Aborting: remaining route unprofitable'
+        );
+
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private simulateLeg(
+    leg: { symbol: string; side: 'BUY' | 'SELL'; fromAsset: string; toAsset: string },
+    bids: { price: number; quantity: number }[],
+    asks: { price: number; quantity: number }[],
+    inputAmount: number,
+    feeRate: number
+  ): { outputAmount: number } | null {
+    if (leg.side === 'BUY') {
+      const execution =
+        this.buyWithQuote(
+          leg.symbol,
+          asks,
+          inputAmount
+        );
+
+      if (!execution) {
+        return null;
+      }
+
+      const feePaidInOutput =
+        execution.baseAmount *
+        feeRate;
+
+      const outputAmount =
+        execution.baseAmount -
+        feePaidInOutput;
+
+      if (
+        !Number.isFinite(outputAmount) ||
+        outputAmount <= 0
+      ) {
+        return null;
+      }
+
+      return {
+        outputAmount
+      };
+    }
+
+    const execution =
+      this.sellBase(
+        leg.symbol,
+        bids,
+        inputAmount
+      );
+
+    if (!execution) {
+      return null;
+    }
+
+    const feePaidInOutput =
+      execution.quoteReceived *
+      feeRate;
+
+    const outputAmount =
+      execution.quoteReceived -
+      feePaidInOutput;
+
+    if (
+      !Number.isFinite(outputAmount) ||
+      outputAmount <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      outputAmount
+    };
+  }
+
+  private buyWithQuote(
+    symbol: string,
+    asks: { price: number; quantity: number }[],
+    quoteAmount: number
+  ): BuyExecution | null {
+    let quoteLeft = quoteAmount;
+
+    let baseAmount = 0;
+    let quoteSpent = 0;
+    let levelsUsed = 0;
+    let limitPrice = 0;
+
+    for (const level of asks) {
+      if (quoteLeft <= 1e-12) {
+        break;
+      }
+
+      if (
+        !Number.isFinite(level.price) ||
+        !Number.isFinite(level.quantity) ||
+        level.price <= 0 ||
+        level.quantity <= 0
+      ) {
+        continue;
+      }
+
+      const maxQuoteAtLevel = level.price * level.quantity;
+
+      const quoteAtLevel = Math.min(quoteLeft, maxQuoteAtLevel);
+
+      const baseAtLevel = quoteAtLevel / level.price;
+
+      baseAmount += baseAtLevel;
+      quoteSpent += quoteAtLevel;
+      quoteLeft -= quoteAtLevel;
+      levelsUsed += 1;
+      limitPrice = level.price;
+    }
+
+    if (
+      quoteLeft > 1e-8 ||
+      baseAmount <= 0 ||
+      quoteSpent <= 0 ||
+      limitPrice <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      baseAmount,
+      quoteSpent,
+      levelsUsed,
+      limitPrice
+    };
+  }
+
+  private sellBase(
+    symbol: string,
+    bids: { price: number; quantity: number }[],
+    baseAmount: number
+  ): SellExecution | null {
+    let baseLeft = baseAmount;
+
+    let quoteReceived = 0;
+    let levelsUsed = 0;
+    let limitPrice = 0;
+
+    for (const level of bids) {
+      if (baseLeft <= 1e-12) {
+        break;
+      }
+
+      if (
+        !Number.isFinite(level.price) ||
+        !Number.isFinite(level.quantity) ||
+        level.price <= 0 ||
+        level.quantity <= 0
+      ) {
+        continue;
+      }
+
+      const baseAtLevel = Math.min(baseLeft, level.quantity);
+
+      quoteReceived += baseAtLevel * level.price;
+      baseLeft -= baseAtLevel;
+      levelsUsed += 1;
+      limitPrice = level.price;
+    }
+
+    if (
+      baseLeft > 1e-8 ||
+      quoteReceived <= 0 ||
+      limitPrice <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      quoteReceived,
+      levelsUsed,
+      limitPrice
+    };
+  }
+
+  private getTakerFeeRate(symbol: string): number {
+    const feeRate = this.config.symbolFilters?.get(symbol.toUpperCase());
+
+    return feeRate ? 0.0004 : 0.0004;
+  }
+
   private async executeLeg(
     legIndex: number,
     opportunity: Opportunity,
@@ -446,6 +769,43 @@ export class OrderExecutionService {
         error:
           `Invalid expected limit price at step ${step}: ` +
           `${leg.expectedLimitPrice}`,
+        timestamp: Date.now()
+      };
+    }
+
+    // Проверка age стакана
+    const book = this.orderBooks.get(leg.symbol);
+
+    if (!book) {
+      return {
+        success: false,
+        error: `Order book not found for ${leg.symbol}`,
+        timestamp: Date.now()
+      };
+    }
+
+    const snapshot = book.getSnapshot(50);
+
+    const maxBookAgeMs = 400;
+
+    if (
+      !snapshot.ready ||
+      Date.now() - snapshot.updatedAt > maxBookAgeMs
+    ) {
+      return {
+        success: false,
+        error: `Order book stale for ${leg.symbol}: age=${Date.now() - snapshot.updatedAt}ms`,
+        timestamp: Date.now()
+      };
+    }
+
+    // Pre-trade revalidation
+    const isValid = await this.revalidateLeg(legIndex, opportunity, inputAmount);
+
+    if (!isValid) {
+      return {
+        success: false,
+        error: `Revalidation failed at step ${step}: market moved`,
         timestamp: Date.now()
       };
     }
