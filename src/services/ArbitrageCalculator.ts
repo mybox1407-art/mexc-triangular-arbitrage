@@ -454,11 +454,28 @@ export class ArbitrageCalculator {
     inputAmount: number,
     feeRate: number
   ): SimulatedLeg | null {
+    // Adverse slippage buffer: 0.3%
+    const stressRate = 0.003;
+
+    const stressedAsks = leg.side === 'BUY'
+      ? asks.map(level => ({
+          ...level,
+          price: level.price * (1 + stressRate)
+        }))
+      : asks;
+
+    const stressedBids = leg.side === 'SELL'
+      ? bids.map(level => ({
+          ...level,
+          price: level.price * (1 - stressRate)
+        }))
+      : bids;
+
     if (leg.side === 'BUY') {
       const execution =
         this.buyWithQuote(
           leg.symbol,
-          asks,
+          stressedAsks,
           inputAmount
         );
 
@@ -502,7 +519,7 @@ export class ArbitrageCalculator {
     const execution =
       this.sellBase(
         leg.symbol,
-        bids,
+        stressedBids,
         inputAmount
       );
 
@@ -641,9 +658,28 @@ export class ArbitrageCalculator {
       return null;
     }
 
+    // ИСПРАВЛЕНИЕ: пересчитываем quoteSpent для округлённого baseAmount
+    let actualQuoteSpent = 0;
+    let baseAccumulated = 0;
+
+    for (const level of asks) {
+      if (baseAccumulated >= roundedBase) break;
+
+      const baseAvailableAtLevel = level.quantity;
+      const baseNeeded = roundedBase - baseAccumulated;
+      const baseAtLevel = Math.min(baseNeeded, baseAvailableAtLevel);
+
+      actualQuoteSpent += baseAtLevel * level.price;
+      baseAccumulated += baseAtLevel;
+    }
+
+    if (actualQuoteSpent > roundedQuote) {
+      return null;
+    }
+
     return {
       baseAmount: roundedBase,
-      quoteSpent,
+      quoteSpent: actualQuoteSpent,
       levelsUsed,
       limitPrice
     };
