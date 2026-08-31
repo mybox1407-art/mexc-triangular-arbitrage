@@ -330,54 +330,54 @@ export class OpportunityService {
           STALE_BOOK_AFTER_MS
       );
 
-    console.info(
-      'Arbitrage diagnostics',
-      {
-        evaluated,
-        unavailable,
-        belowThreshold,
-        opportunities,
-        bestTriangle:
-          best?.triangleId ?? null,
-        bestStartAsset:
-          best?.startAsset ?? null,
-        bestStartAmount:
-          best?.startAmount ??
-          config.trading.startNotional,
-        bestFinalAmount:
-          best?.finalAmount ?? null,
-        bestGrossRoiBeforeFees:
-          best?.grossRoiBeforeFees ??
-          null,
-        bestGrossRoiAfterFees:
-          best?.grossRoiAfterFees ??
-          null,
-        bestTotalFeeRate:
-          best?.totalFeeRate ??
-          null,
-        bestTotalFeeInStartAsset:
-          best?.totalFeeInStartAsset ??
-          null,
-        bestNetRoi:
-          best?.netRoi ?? null,
-        bestExpectedProfit:
-          best?.expectedProfit ??
-          null,
-        minGrossRoiAfterFees:
-          config.trading.minGrossRoiAfterFees,
-        minNetRoi:
-          config.trading.minNetRoi,
-        takerFeeRate:
-          config.trading.takerFeeRate,
-        safetyBufferRate:
-          config.trading.safetyBufferRate,
-        maxExecutionBookAgeMs:
-          MAX_EXECUTION_BOOK_AGE_MS,
-        bookAges,
-        staleBooksCount:
-          staleBooks.length
-      }
-    );
+    //console.info(
+    //  'Arbitrage diagnostics',
+    //  {
+    //    evaluated,
+    //    unavailable,
+    //    belowThreshold,
+    //    opportunities,
+    //    bestTriangle:
+    //      best?.triangleId ?? null,
+    //    bestStartAsset:
+    //      best?.startAsset ?? null,
+    //    bestStartAmount:
+    //      best?.startAmount ??
+    //      config.trading.startNotional,
+    //    bestFinalAmount:
+    //      best?.finalAmount ?? null,
+    //    bestGrossRoiBeforeFees:
+    //      best?.grossRoiBeforeFees ??
+    //      null,
+    //    bestGrossRoiAfterFees:
+    //      best?.grossRoiAfterFees ??
+    //      null,
+    //    bestTotalFeeRate:
+    //      best?.totalFeeRate ??
+    //      null,
+    //    bestTotalFeeInStartAsset:
+    //      best?.totalFeeInStartAsset ??
+    //      null,
+    //    bestNetRoi:
+    //      best?.netRoi ?? null,
+    //    bestExpectedProfit:
+    //      best?.expectedProfit ??
+    //      null,
+    //    minGrossRoiAfterFees:
+    //      config.trading.minGrossRoiAfterFees,
+    //    minNetRoi:
+    //      config.trading.minNetRoi,
+    //    takerFeeRate:
+    //      config.trading.takerFeeRate,
+    //    safetyBufferRate:
+    //      config.trading.safetyBufferRate,
+    //    maxExecutionBookAgeMs:
+    //      MAX_EXECUTION_BOOK_AGE_MS,
+    //    bookAges,
+    //    staleBooksCount:
+    //      staleBooks.length
+    //  }
+    //);
 
     if (
       best &&
