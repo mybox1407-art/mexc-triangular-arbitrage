@@ -1,3 +1,5 @@
+// src/services/OpportunityService.ts
+
 import { config } from '../config.js';
 import { OrderBook } from '../domain/orderBook.js';
 import type {
@@ -57,9 +59,18 @@ export class OpportunityService {
     private readonly books: Map<string, OrderBook>,
     private readonly calculator: ArbitrageCalculator,
     private readonly performanceLogWriter: PerformanceLogWriter,
+
+    // Новый callback: вызывается для ВСЕХ положительных возможностей (expectedProfit > 0)
+    private readonly onPositiveOpportunity: (
+      opportunity: Opportunity,
+      triangle: Triangle
+    ) => Promise<void>,
+
+    // Старый callback: вызывается только для возможностей, прошедших порог
     private readonly onOpportunity: (
       opportunity: Opportunity
     ) => Promise<void>,
+
     private readonly bestRouteWriter?: CsvBestRouteWriter
   ) {}
 
@@ -139,6 +150,20 @@ export class OpportunityService {
           opportunity;
       }
 
+      // === НОВОЕ: пишем ВСЕ положительные возможности (expectedProfit > 0) ===
+      if (opportunity.expectedProfit > 0) {
+        void this.onPositiveOpportunity(
+          opportunity,
+          triangle
+        ).catch((error) => {
+          console.error(
+            'Failed to write positive opportunity',
+            error
+          );
+        });
+      }
+
+      // === СТАРАЯ ЛОГИКА: фильтр по порогу для исполнения и Telegram ===
       if (
         !this.passesThreshold(
           opportunity
@@ -330,54 +355,54 @@ export class OpportunityService {
           STALE_BOOK_AFTER_MS
       );
 
-    //console.info(
-    //  'Arbitrage diagnostics',
-    //  {
-    //    evaluated,
-    //    unavailable,
-    //    belowThreshold,
-    //    opportunities,
-    //    bestTriangle:
-    //      best?.triangleId ?? null,
-    //    bestStartAsset:
-    //      best?.startAsset ?? null,
-    //    bestStartAmount:
-    //      best?.startAmount ??
-    //      config.trading.startNotional,
-    //    bestFinalAmount:
-    //      best?.finalAmount ?? null,
-    //    bestGrossRoiBeforeFees:
-    //      best?.grossRoiBeforeFees ??
-    //      null,
-    //    bestGrossRoiAfterFees:
-    //      best?.grossRoiAfterFees ??
-    //      null,
-    //    bestTotalFeeRate:
-    //      best?.totalFeeRate ??
-    //      null,
-    //    bestTotalFeeInStartAsset:
-    //      best?.totalFeeInStartAsset ??
-    //      null,
-    //    bestNetRoi:
-    //      best?.netRoi ?? null,
-    //    bestExpectedProfit:
-    //      best?.expectedProfit ??
-    //      null,
-    //    minGrossRoiAfterFees:
-    //      config.trading.minGrossRoiAfterFees,
-    //    minNetRoi:
-    //      config.trading.minNetRoi,
-    //    takerFeeRate:
-    //      config.trading.takerFeeRate,
-    //    safetyBufferRate:
-    //      config.trading.safetyBufferRate,
-    //    maxExecutionBookAgeMs:
-    //      MAX_EXECUTION_BOOK_AGE_MS,
-    //    bookAges,
-    //    staleBooksCount:
-    //      staleBooks.length
-    //  }
-    //);
+    console.info(
+      'Arbitrage diagnostics',
+      {
+        evaluated,
+        unavailable,
+        belowThreshold,
+        opportunities,
+        bestTriangle:
+          best?.triangleId ?? null,
+        bestStartAsset:
+          best?.startAsset ?? null,
+        bestStartAmount:
+          best?.startAmount ??
+          config.trading.startNotional,
+        bestFinalAmount:
+          best?.finalAmount ?? null,
+        bestGrossRoiBeforeFees:
+          best?.grossRoiBeforeFees ??
+          null,
+        bestGrossRoiAfterFees:
+          best?.grossRoiAfterFees ??
+          null,
+        bestTotalFeeRate:
+          best?.totalFeeRate ??
+          null,
+        bestTotalFeeInStartAsset:
+          best?.totalFeeInStartAsset ??
+          null,
+        bestNetRoi:
+          best?.netRoi ?? null,
+        bestExpectedProfit:
+          best?.expectedProfit ??
+          null,
+        minGrossRoiAfterFees:
+          config.trading.minGrossRoiAfterFees,
+        minNetRoi:
+          config.trading.minNetRoi,
+        takerFeeRate:
+          config.trading.takerFeeRate,
+        safetyBufferRate:
+          config.trading.safetyBufferRate,
+        maxExecutionBookAgeMs:
+          MAX_EXECUTION_BOOK_AGE_MS,
+        bookAges,
+        staleBooksCount:
+          staleBooks.length
+      }
+    );
 
     if (
       best &&
