@@ -1,3 +1,5 @@
+// src/index.ts
+
 import pino from 'pino';
 import { config } from './config.js';
 import { ConfigValidator } from './utils/ConfigValidator.js';
@@ -557,6 +559,19 @@ async function main(): Promise<void> {
       books,
       calculator,
       performanceLogWriter,
+
+      // onPositiveOpportunity: ВСЕ положительные сигналы (expectedProfit > 0) → CSV
+      async (
+        opportunity,
+        triangle
+      ) => {
+        await csvWriter.write(
+          opportunity,
+          triangle
+        );
+      },
+
+      // onOpportunity: только прошедшие порог → Telegram + исполнение
       async (opportunity) => {
         const triangle =
           readyTriangles.find(
@@ -565,10 +580,8 @@ async function main(): Promise<void> {
               opportunity.triangleId
           );
 
-        await csvWriter.write(
-          opportunity,
-          triangle
-        );
+        // Закомментируй эту строку, если не хочешь дубликатов в CSV:
+        // await csvWriter.write(opportunity, triangle);
 
         try {
           await telegramNotifier
@@ -644,6 +657,7 @@ async function main(): Promise<void> {
           }
         }
       },
+
       csvBestRouteWriter
     );
 
